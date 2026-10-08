@@ -1,0 +1,250 @@
+# SkillManagerOS
+
+SkillManagerOS is an early, read-only command-line tool for discovering local
+AI skills installed for ChatGPT and Claude.
+
+This repository is currently focused on **MVP 1A: local skill discovery**. The
+program finds folders containing `SKILL.md` and reports where they are located.
+It does not inspect, execute, install, modify, or remove any skill.
+
+## Project goals
+
+The long-term goal is to build a local-first manager for skills, plugins, and
+Model Context Protocol (MCP) connections used by AI applications. Starting with
+a small CLI lets the project validate local discovery before adding a desktop
+interface or configuration management.
+
+The current version answers one question:
+
+> Which local skills are installed for ChatGPT and Claude, and where are they?
+
+## Current features
+
+- Scan ChatGPT skill and plugin directories.
+- Scan Claude skill and plugin directories.
+- Select one application or scan both.
+- Find direct and plugin-provided skills using the `SKILL.md` marker.
+- Print a simple list grouped by application.
+- Produce JSON output for future integrations.
+- Report missing or inaccessible scan locations.
+- Avoid symbolic links and large dependency directories.
+- Run completely offline with no third-party dependencies.
+
+## What it does not do yet
+
+- Parse skill metadata or instructions.
+- Discover MCP configuration files.
+- Discover plugin manifests as inventory items.
+- Test whether an MCP server is running.
+- Discover cloud-managed connections.
+- Audit skill security.
+- Install, disable, update, or remove anything.
+- Provide a graphical interface.
+
+## Requirements
+
+- Node.js 20 or newer.
+- macOS for the initial tested version.
+
+The scanner is written with cross-platform Node.js APIs, but Windows and Linux
+default locations have not been added or tested yet.
+
+Check your Node.js version:
+
+```bash
+node --version
+```
+
+## Getting started
+
+No package installation is required because the project has no external runtime
+dependencies.
+
+From the repository directory, start the interactive CLI:
+
+```bash
+npm start
+```
+
+You will be asked which application to scan:
+
+```text
+Which application would you like to scan?
+  1. ChatGPT
+  2. Claude
+  3. Both
+Select 1, 2, or 3:
+```
+
+You can also make a selection directly:
+
+```bash
+npm run scan -- --app chatgpt
+npm run scan -- --app claude
+npm run scan -- --app all
+```
+
+Human-readable results are grouped by application:
+
+```text
+ChatGPT
+  pdf
+  presentations
+  spreadsheets
+
+Claude
+  document-review
+  research
+```
+
+The default output intentionally keeps the inventory easy to scan. Use JSON
+output when exact directories and other discovery details are needed.
+
+Or run the executable file directly:
+
+```bash
+node ./bin/skillmanager.js scan --app chatgpt
+```
+
+### JSON output
+
+Use `--json` when another program needs to consume the results:
+
+```bash
+node ./bin/skillmanager.js scan --app all --json
+```
+
+JSON output contains two arrays:
+
+```json
+{
+  "skills": [],
+  "diagnostics": []
+}
+```
+
+## Default scan locations
+
+The initial macOS version checks these locations:
+
+| Application | Purpose | Location |
+|---|---|---|
+| ChatGPT | Direct skills | `~/.codex/skills` |
+| ChatGPT | Plugin-provided skills | `~/.codex/plugins` |
+| Claude | Direct skills | `~/.claude/skills` |
+| Claude | Plugin-provided skills | `~/.claude/plugins` |
+| Claude Desktop | Session/plugin skill snapshots | `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin` |
+
+A missing directory is normal. It usually means that the application has no
+local items installed in that location.
+
+These paths are intentionally centralized in `src/applications.js` so that
+platform-specific paths can be added without rewriting the scanner.
+
+## How discovery works
+
+The scanner follows this process:
+
+1. Load the locations associated with the selected applications.
+2. Check whether each location exists and is a readable directory.
+3. Walk through its subdirectories.
+4. Treat a directory containing `SKILL.md` as one installed skill.
+5. Stop descending into that skill because nested folders are supporting files.
+6. Hash `SKILL.md` in memory to collapse identical session snapshots.
+7. Return skill locations and any scan diagnostics.
+
+The skill name currently comes from the containing folder name. Reading names
+and descriptions from `SKILL.md` belongs to the next parsing milestone.
+
+## Safety model
+
+Discovered files must be treated as untrusted input. This version follows these
+rules:
+
+- Never execute discovered scripts or commands.
+- Never modify discovered files.
+- Never parse `SKILL.md` as executable code.
+- Use skill contents only to create a local fingerprint for exact deduplication.
+- Never save or transmit the fingerprinted contents.
+- Never follow symbolic links.
+- Never scan the entire home directory.
+- Skip `.git`, `node_modules`, build output, and similar directories.
+- Stop recursively scanning below a fixed maximum depth.
+- Continue when an optional location is missing or unreadable.
+- Do not send scan results over the network.
+
+## Project structure
+
+```text
+SkillManagerOS/
+├── bin/
+│   └── skillmanager.js       Command-line entry point
+├── src/
+│   ├── applications.js       Supported apps and default locations
+│   ├── cli.js                Arguments, interactive menu, and output
+│   └── scanner.js            Read-only filesystem discovery
+├── test/
+│   ├── cli.test.js           Command argument tests
+│   └── scanner.test.js       Scanner behavior and safety tests
+├── package.json
+└── README.md
+```
+
+Keeping these responsibilities separate makes the code easier to learn:
+
+- `applications.js` answers **where should we look?**
+- `scanner.js` answers **what skill markers are present?**
+- `cli.js` answers **what did the user request and how should results appear?**
+
+## Development
+
+Run the automated tests:
+
+```bash
+npm test
+```
+
+Check JavaScript syntax:
+
+```bash
+npm run check
+```
+
+The tests create temporary fake skill directories. They do not inspect or
+modify your real ChatGPT or Claude files.
+
+## Adding another default location
+
+Add a location to the appropriate application in `src/applications.js`:
+
+```js
+{
+  label: "Example skills",
+  path: path.join(os.homedir(), ".example", "skills"),
+  source: "default",
+}
+```
+
+The shared scanner will include it automatically.
+
+## Planned milestones
+
+1. **MVP 1A — Local skill discovery:** current milestone.
+2. **MVP 1B — Parsing:** read safe metadata from skills and normalize results.
+3. **MVP 1C — Inventory:** add richer filtering and a desktop interface.
+4. **MVP 1D — Change detection:** identify added, removed, and modified items.
+5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe
+   management.
+
+## Contributing principles
+
+- Prefer small modules with one responsibility.
+- Use clear names before adding explanatory comments.
+- Comment the reason behind a decision, not every line of code.
+- Add tests for new discovery and safety behavior.
+- Keep filesystem operations read-only during the discovery milestones.
+- Do not add a dependency when a small built-in Node.js API is sufficient.
+
+## License
+
+This research project is licensed under the MIT License.
