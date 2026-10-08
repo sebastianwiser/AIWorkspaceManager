@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { readSkillMetadata } from "./metadata.js";
 
 const SKILL_FILENAME = "SKILL.md";
 const DEFAULT_MAX_DEPTH = 10;
@@ -20,8 +21,8 @@ const IGNORED_DIRECTORY_NAMES = new Set([
 /**
  * Scan one or more application locations for directories containing SKILL.md.
  *
- * This function is deliberately read-only. It does not parse or execute skill
- * content. A later milestone can inspect metadata after discovery is trusted.
+ * This function is deliberately read-only. It parses declarative frontmatter
+ * but never executes skill instructions or supporting files.
  *
  * @param {object} options
  * @param {Array<object>} options.applications Application definitions to scan.
@@ -163,16 +164,24 @@ async function walkDirectory({
 
   if (instructionEntry) {
     const instructionFile = path.join(currentPath, SKILL_FILENAME);
+    const folderName = path.basename(currentPath);
     const stats = await safeStat(instructionFile);
     const contentFingerprint = await createFileFingerprint(instructionFile);
+    const metadata = await readSkillMetadata(instructionFile, folderName);
+    const source = classifySkillSource(application.id, location.source, currentPath);
 
     skills.push({
       application: application.id,
       applicationName: application.displayName,
-      name: path.basename(currentPath),
+      name: metadata.name,
+      folderName,
+      description: metadata.description,
+      metadataStatus: metadata.metadataStatus,
+      metadataIssues: metadata.metadataIssues,
       directory: currentPath,
       instructionFile,
-      source: location.source,
+      source: source.id,
+      sourceName: source.displayName,
       sourceLabel: location.label,
       modifiedAt: stats?.mtime?.toISOString() ?? null,
       contentFingerprint,
@@ -219,6 +228,32 @@ async function createFileFingerprint(filePath) {
     // enough to report the discovered marker without stopping the whole scan.
     return null;
   }
+}
+
+function classifySkillSource(applicationId, configuredSource, skillPath) {
+  if (applicationId === "chatgpt" && configuredSource === "default") {
+    const isSystemSkill = skillPath.split(path.sep).includes(".system");
+    return isSystemSkill
+      ? { id: "system", displayName: "System" }
+      : { id: "personal", displayName: "Personal" };
+  }
+
+  if (applicationId === "chatgpt" && configuredSource === "plugin") {
+    const isCache = skillPath.split(path.sep).includes("cache");
+    return isCache
+      ? { id: "plugin-cache", displayName: "Plugin cache" }
+      : { id: "plugin", displayName: "Plugin" };
+  }
+
+  if (configuredSource === "desktop-plugin") {
+    return { id: "claude-desktop-plugin", displayName: "Claude Desktop plugin" };
+  }
+
+  if (configuredSource === "plugin") {
+    return { id: "plugin", displayName: "Plugin" };
+  }
+
+  return { id: "personal", displayName: "Personal" };
 }
 
 function createAccessDiagnostic(application, location, rootPath, error) {

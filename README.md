@@ -3,9 +3,10 @@
 SkillManagerOS is an early, read-only command-line tool for discovering local
 AI skills installed for ChatGPT and Claude.
 
-This repository is currently focused on **MVP 1A: local skill discovery**. The
-program finds folders containing `SKILL.md` and reports where they are located.
-It does not inspect, execute, install, modify, or remove any skill.
+This repository currently includes **MVP 1A: local skill discovery** and
+**MVP 1B: safe metadata parsing**. The program finds folders containing
+`SKILL.md`, reads their declarative YAML frontmatter, and reports what it finds.
+It does not execute, install, modify, or remove any skill.
 
 ## Project goals
 
@@ -16,7 +17,8 @@ interface or configuration management.
 
 The current version answers one question:
 
-> Which local skills are installed for ChatGPT and Claude, and where are they?
+> Which local skills are installed for ChatGPT and Claude, what do they do, and
+> where did they come from?
 
 ## Current features
 
@@ -24,15 +26,19 @@ The current version answers one question:
 - Scan Claude skill and plugin directories.
 - Select one application or scan both.
 - Find direct and plugin-provided skills using the `SKILL.md` marker.
+- Read declared skill names and descriptions from YAML frontmatter.
+- Classify personal, system, plugin, plugin-cache, and Claude Desktop sources.
+- Identify missing, incomplete, invalid, or unreadable metadata.
+- Group same-named definitions as variants without discarding either one.
 - Print a simple list grouped by application.
+- Show richer metadata with `--details`.
 - Produce JSON output for future integrations.
 - Report missing or inaccessible scan locations.
 - Avoid symbolic links and large dependency directories.
-- Run completely offline with no third-party dependencies.
+- Run completely offline after the one-time dependency installation.
 
 ## What it does not do yet
 
-- Parse skill metadata or instructions.
 - Discover MCP configuration files.
 - Discover plugin manifests as inventory items.
 - Test whether an MCP server is running.
@@ -57,8 +63,11 @@ node --version
 
 ## Getting started
 
-No package installation is required because the project has no external runtime
-dependencies.
+Install the single runtime dependency:
+
+```bash
+npm install
+```
 
 From the repository directory, start the interactive CLI:
 
@@ -82,6 +91,7 @@ You can also make a selection directly:
 npm run scan -- --app chatgpt
 npm run scan -- --app claude
 npm run scan -- --app all
+npm run scan -- --app all --details
 ```
 
 Human-readable results are grouped by application:
@@ -97,8 +107,13 @@ Claude
   research
 ```
 
-The default output intentionally keeps the inventory easy to scan. Use JSON
-output when exact directories and other discovery details are needed.
+The default output intentionally keeps the inventory easy to scan. Use
+`--details` for descriptions, sources, metadata status, and locations. Use JSON
+output when another program needs the complete records.
+
+```bash
+npm run scan -- --app chatgpt --details
+```
 
 Or run the executable file directly:
 
@@ -122,6 +137,29 @@ JSON output contains two arrays:
   "diagnostics": []
 }
 ```
+
+Each skill record includes its application, declared and folder names,
+description, source classification, metadata status, location, and modification
+time. JSON preserves separate records for same-named variants.
+
+## Metadata status
+
+The scanner assigns one transparent status to each local definition:
+
+| Status | Meaning |
+|---|---|
+| `valid` | The frontmatter contains string `name` and `description` fields. |
+| `incomplete` | Frontmatter parsed, but a required field is missing or invalid. |
+| `missing` | The file does not begin with YAML frontmatter. |
+| `invalid` | Frontmatter exists but cannot be parsed safely. |
+| `unreadable` | The marker was found, but its contents could not be read. |
+
+The simple view marks any non-valid definition. The detailed view explains the
+specific issue. Malformed metadata never removes a discovered skill from the
+inventory.
+
+If several files have the same declared name and different contents, the CLI
+shows them as variants. Byte-identical session snapshots are collapsed.
 
 ## Default scan locations
 
@@ -150,11 +188,10 @@ The scanner follows this process:
 3. Walk through its subdirectories.
 4. Treat a directory containing `SKILL.md` as one installed skill.
 5. Stop descending into that skill because nested folders are supporting files.
-6. Hash `SKILL.md` in memory to collapse identical session snapshots.
-7. Return skill locations and any scan diagnostics.
-
-The skill name currently comes from the containing folder name. Reading names
-and descriptions from `SKILL.md` belongs to the next parsing milestone.
+6. Parse the bounded YAML frontmatter for a declared name and description.
+7. Fall back to the folder name when metadata is missing or invalid.
+8. Hash `SKILL.md` in memory to collapse identical session snapshots.
+9. Classify the local source and return results with scan diagnostics.
 
 ## Safety model
 
@@ -164,6 +201,8 @@ rules:
 - Never execute discovered scripts or commands.
 - Never modify discovered files.
 - Never parse `SKILL.md` as executable code.
+- Parse at most 64 KB as declarative YAML frontmatter.
+- Strip terminal control sequences from human-readable output.
 - Use skill contents only to create a local fingerprint for exact deduplication.
 - Never save or transmit the fingerprinted contents.
 - Never follow symbolic links.
@@ -182,10 +221,13 @@ SkillManagerOS/
 ├── src/
 │   ├── applications.js       Supported apps and default locations
 │   ├── cli.js                Arguments, interactive menu, and output
+│   ├── metadata.js           Bounded YAML frontmatter parsing
 │   └── scanner.js            Read-only filesystem discovery
 ├── test/
 │   ├── cli.test.js           Command argument tests
+│   ├── metadata.test.js      Metadata parsing and edge-case tests
 │   └── scanner.test.js       Scanner behavior and safety tests
+├── package-lock.json         Reproducible dependency versions
 ├── package.json
 └── README.md
 ```
@@ -193,6 +235,7 @@ SkillManagerOS/
 Keeping these responsibilities separate makes the code easier to learn:
 
 - `applications.js` answers **where should we look?**
+- `metadata.js` answers **what safe metadata does the skill declare?**
 - `scanner.js` answers **what skill markers are present?**
 - `cli.js` answers **what did the user request and how should results appear?**
 
@@ -229,8 +272,8 @@ The shared scanner will include it automatically.
 
 ## Planned milestones
 
-1. **MVP 1A — Local skill discovery:** current milestone.
-2. **MVP 1B — Parsing:** read safe metadata from skills and normalize results.
+1. **MVP 1A — Local skill discovery:** complete.
+2. **MVP 1B — Parsing:** complete.
 3. **MVP 1C — Inventory:** add richer filtering and a desktop interface.
 4. **MVP 1D — Change detection:** identify added, removed, and modified items.
 5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe

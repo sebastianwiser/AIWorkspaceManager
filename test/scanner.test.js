@@ -33,6 +33,42 @@ test("finds a directory containing SKILL.md", async (t) => {
   assert.equal(result.skills[0].name, "pdf-tools");
   assert.equal(result.skills[0].application, "chatgpt");
   assert.equal(result.skills[0].instructionFile, path.join(skillDirectory, "SKILL.md"));
+  assert.equal(result.skills[0].metadataStatus, "missing");
+});
+
+test("uses declared metadata instead of only the folder name", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const skillDirectory = path.join(root, "folder-name");
+  await fs.mkdir(skillDirectory);
+  await fs.writeFile(
+    path.join(skillDirectory, "SKILL.md"),
+    "---\nname: Friendly Name\ndescription: Explains the skill.\n---\n",
+  );
+
+  const result = await scanApplications({
+    applications: [createApplication("chatgpt", root)],
+  });
+
+  assert.equal(result.skills[0].name, "Friendly Name");
+  assert.equal(result.skills[0].folderName, "folder-name");
+  assert.equal(result.skills[0].description, "Explains the skill.");
+  assert.equal(result.skills[0].metadataStatus, "valid");
+  assert.equal(result.skills[0].source, "personal");
+  assert.equal(result.skills[0].sourceName, "Personal");
+});
+
+test("classifies ChatGPT system skills", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const skillDirectory = path.join(root, ".system", "built-in-skill");
+  await fs.mkdir(skillDirectory, { recursive: true });
+  await fs.writeFile(path.join(skillDirectory, "SKILL.md"), "# Built in\n");
+
+  const result = await scanApplications({
+    applications: [createApplication("chatgpt", root)],
+  });
+
+  assert.equal(result.skills[0].source, "system");
+  assert.equal(result.skills[0].sourceName, "System");
 });
 
 test("finds plugin-provided skills in nested directories", async (t) => {
