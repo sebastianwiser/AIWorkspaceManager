@@ -69,6 +69,23 @@ export interface ScanResult {
   diagnostics: ScanDiagnostic[];
 }
 
+export interface DesktopScanResult extends ScanResult {
+  scannedAt: string;
+}
+
+export interface SkillContent {
+  content: string;
+  truncated: boolean;
+}
+
+export type SkillContentResult = ({ ok: true } & SkillContent) | { ok: false; error: string };
+
+/** The complete, intentionally small API exposed to the desktop renderer. */
+export interface DesktopApi {
+  scan(): Promise<DesktopScanResult>;
+  readSkillContent(instructionFile: string): Promise<SkillContentResult>;
+}
+
 export interface LocationScanResult {
   skills: InternalDiscoveredSkill[];
   diagnostics: ScanDiagnostic[];

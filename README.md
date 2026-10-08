@@ -4,15 +4,15 @@ SkillManagerOS is an early, read-only command-line tool for discovering local AI
 for ChatGPT and Claude.
 
 This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
-parsing**, and the command-line portion of **MVP 1C: inventory**. The program finds folders
-containing `SKILL.md`, reads their declarative YAML frontmatter, and reports what it finds. It does
-not execute, install, modify, or remove any skill.
+parsing**, and **MVP 1C: inventory**. The program finds folders containing `SKILL.md`, reads their
+declarative YAML frontmatter, and presents the inventory through a desktop app or CLI. It does not
+execute, install, modify, or remove any skill.
 
 ## Project goals
 
 The long-term goal is to build a local-first manager for skills, plugins, and Model Context Protocol
-(MCP) connections used by AI applications. Starting with a small CLI lets the project validate local
-discovery before adding a desktop interface or configuration management.
+(MCP) connections used by AI applications. The project starts with read-only local discovery so its
+inventory behavior can be validated before configuration management is added.
 
 The current version answers one question:
 
@@ -32,6 +32,9 @@ The current version answers one question:
 - Search names, folder names, and descriptions.
 - Filter by application, source, and metadata status.
 - Sort by name, application, source, or modification date.
+- Browse inventory metadata and rendered, read-only `SKILL.md` contents in a desktop interface.
+- Switch between a formatted GitHub-style Markdown preview and the original source text.
+- Rescan local locations from the desktop interface.
 - Print a simple list grouped by application.
 - Show richer metadata with `--details`.
 - Produce JSON output for future integrations.
@@ -47,7 +50,7 @@ The current version answers one question:
 - Discover cloud-managed connections.
 - Audit skill security.
 - Install, disable, update, or remove anything.
-- Provide a graphical interface.
+- Ship signed or packaged desktop installers.
 
 ## Requirements
 
@@ -70,6 +73,17 @@ Install the project dependencies:
 ```bash
 npm install
 ```
+
+Launch the desktop interface:
+
+```bash
+npm run desktop
+```
+
+This builds the TypeScript and React code, then opens the local Electron application. The first
+desktop version is a development build rather than a packaged `.app` installer.
+
+### Command-line interface
 
 From the repository directory, start the interactive CLI:
 
@@ -235,6 +249,9 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Never execute discovered scripts or commands.
 - Never modify discovered files.
 - Never parse `SKILL.md` as executable code.
+- Allow the desktop content viewer to read only files returned by the latest scan.
+- Limit each desktop content preview to 512 KB to keep the interface responsive.
+- Render Markdown without raw HTML or remote images, so viewed content remains inert and local.
 - Parse at most 64 KB as declarative YAML frontmatter.
 - Strip terminal control sequences from human-readable output.
 - Use skill contents only to create a local fingerprint for exact deduplication.
@@ -245,6 +262,9 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Stop recursively scanning below a fixed maximum depth.
 - Continue when an optional location is missing or unreadable.
 - Do not send scan results over the network.
+- Keep filesystem access in Electron's main process.
+- Expose only a narrow, read-only scan function to the desktop interface.
+- Disable renderer Node.js access, new windows, and web navigation.
 
 ## Project structure
 
@@ -255,6 +275,10 @@ SkillManagerOS/
 ├── src/
 │   ├── applications.ts       Supported apps and default locations
 │   ├── cli.ts                Arguments, interactive menu, and output
+│   ├── desktop/
+│   │   ├── main.ts           Secure Electron main process
+│   │   ├── preload.cts       Narrow read-only desktop bridge
+│   │   └── renderer/         React inventory interface and styles
 │   ├── inventory.ts          Reusable searching, filtering, and sorting
 │   ├── main.ts               Development command-line entry point
 │   ├── metadata.ts           Bounded YAML frontmatter parsing
@@ -270,6 +294,7 @@ SkillManagerOS/
 ├── package.json
 ├── tsconfig.json             Strict development type checking
 ├── tsconfig.build.json       Production JavaScript build
+├── vite.config.ts            Desktop renderer build
 └── README.md
 ```
 
@@ -281,6 +306,7 @@ Keeping these responsibilities separate makes the code easier to learn:
 - `scanner.ts` answers **what skill markers are present?**
 - `cli.ts` answers **what did the user request and how should results appear?**
 - `types.ts` defines the records shared by those modules.
+- `desktop/` presents the same inventory through a secure local window.
 
 ## Development
 
@@ -296,7 +322,7 @@ Run strict type checking, linting, and a formatting check:
 npm run check
 ```
 
-Create production JavaScript in the ignored `dist/` directory:
+Create the production CLI, Electron processes, and React interface in the ignored `dist/` directory:
 
 ```bash
 npm run build
@@ -329,7 +355,7 @@ The shared scanner will include it automatically.
 
 1. **MVP 1A — Local skill discovery:** complete.
 2. **MVP 1B — Parsing:** complete.
-3. **MVP 1C — Inventory:** command-line filtering complete; desktop interface next.
+3. **MVP 1C — Inventory:** complete with reusable filtering, CLI controls, and a desktop interface.
 4. **MVP 1D — Change detection:** identify added, removed, and modified items.
 5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe management.
 

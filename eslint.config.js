@@ -8,7 +8,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    files: ["src/**/*.{ts,tsx,cts}", "test/**/*.ts", "vite.config.ts"],
     rules: {
       "@typescript-eslint/consistent-type-imports": "error",
       "@typescript-eslint/no-unused-vars": ["error", { varsIgnorePattern: "^_" }],

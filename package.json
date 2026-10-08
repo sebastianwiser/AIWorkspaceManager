@@ -1,8 +1,9 @@
 {
   "name": "skillmanager-os",
-  "version": "0.2.0",
-  "description": "A read-only CLI for discovering local AI skills.",
+  "version": "0.3.0",
+  "description": "A read-only desktop app and CLI for discovering local AI skills.",
   "type": "module",
+  "main": "./dist/desktop/main.js",
   "bin": {
     "skillmanager": "./bin/skillmanager.js"
   },
@@ -11,7 +12,10 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "npm run build:core && npm run build:renderer",
+    "build:core": "tsc --project tsconfig.build.json",
+    "build:renderer": "vite build",
+    "desktop": "npm run build && electron .",
     "start": "tsx ./src/main.ts",
     "scan": "tsx ./src/main.ts scan",
     "test": "node --import tsx --test test/*.test.ts",
@@ -28,15 +32,24 @@
   "license": "MIT",
   "private": true,
   "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^44.7.0",
     "eslint": "^10.12.0",
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.1"
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.3.4"
   }
 }
