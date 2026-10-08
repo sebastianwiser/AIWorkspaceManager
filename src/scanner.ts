@@ -1,7 +1,20 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import type { Stats } from "node:fs";
 import { readSkillMetadata } from "./metadata.js";
+import type {
+  ApplicationDefinition,
+  ApplicationId,
+  DiscoveredSkill,
+  InternalDiscoveredSkill,
+  LocationScanResult,
+  LocationSource,
+  ScanDiagnostic,
+  ScanLocationDefinition,
+  ScanResult,
+  SkillSourceId,
+} from "./types.js";
 
 const SKILL_FILENAME = "SKILL.md";
 const DEFAULT_MAX_DEPTH = 10;
@@ -23,19 +36,14 @@ const IGNORED_DIRECTORY_NAMES = new Set([
  *
  * This function is deliberately read-only. It parses declarative frontmatter
  * but never executes skill instructions or supporting files.
- *
- * @param {object} options
- * @param {Array<object>} options.applications Application definitions to scan.
- * @param {number} [options.maxDepth] Maximum directory depth below each root.
- * @returns {Promise<{skills: Array<object>, diagnostics: Array<object>}>}
  */
 export async function scanApplications({
   applications,
   maxDepth = DEFAULT_MAX_DEPTH,
-}) {
-  const skills = [];
-  const diagnostics = [];
-  const seenSkills = new Set();
+}: ScanApplicationsOptions): Promise<ScanResult> {
+  const skills: DiscoveredSkill[] = [];
+  const diagnostics: ScanDiagnostic[] = [];
+  const seenSkills = new Set<string>();
 
   for (const application of applications) {
     for (const location of application.locations) {
@@ -57,7 +65,7 @@ export async function scanApplications({
 
         if (!seenSkills.has(identity)) {
           seenSkills.add(identity);
-          const { contentFingerprint, ...publicSkill } = skill;
+          const { contentFingerprint: _contentFingerprint, ...publicSkill } = skill;
           skills.push(publicSkill);
         }
       }
@@ -76,9 +84,13 @@ export async function scanApplications({
  * Scan a single configured location.
  * Exported for focused tests and future custom-location support.
  */
-export async function scanLocation({ application, location, maxDepth = DEFAULT_MAX_DEPTH }) {
-  const skills = [];
-  const diagnostics = [];
+export async function scanLocation({
+  application,
+  location,
+  maxDepth = DEFAULT_MAX_DEPTH,
+}: ScanLocationOptions): Promise<LocationScanResult> {
+  const skills: InternalDiscoveredSkill[] = [];
+  const diagnostics: ScanDiagnostic[] = [];
   const rootPath = path.resolve(location.path);
 
   let rootStats;
@@ -132,7 +144,7 @@ async function walkDirectory({
   maxDepth,
   skills,
   diagnostics,
-}) {
+}: WalkDirectoryOptions): Promise<void> {
   if (depth > maxDepth) {
     diagnostics.push({
       application: application.id,
@@ -152,15 +164,13 @@ async function walkDirectory({
       application: application.id,
       location: currentPath,
       severity: "warning",
-      code: error.code === "EACCES" ? "PERMISSION_DENIED" : "READ_FAILED",
-      message: `Could not read this directory: ${error.message}`,
+      code: getNodeErrorCode(error) === "EACCES" ? "PERMISSION_DENIED" : "READ_FAILED",
+      message: `Could not read this directory: ${getErrorMessage(error)}`,
     });
     return;
   }
 
-  const instructionEntry = entries.find(
-    (entry) => entry.isFile() && entry.name === SKILL_FILENAME,
-  );
+  const instructionEntry = entries.find((entry) => entry.isFile() && entry.name === SKILL_FILENAME);
 
   if (instructionEntry) {
     const instructionFile = path.join(currentPath, SKILL_FILENAME);
@@ -210,7 +220,7 @@ async function walkDirectory({
   }
 }
 
-async function safeStat(filePath) {
+async function safeStat(filePath: string): Promise<Stats | null> {
   try {
     return await fs.stat(filePath);
   } catch {
@@ -219,7 +229,7 @@ async function safeStat(filePath) {
   }
 }
 
-async function createFileFingerprint(filePath) {
+async function createFileFingerprint(filePath: string): Promise<string | null> {
   try {
     const contents = await fs.readFile(filePath);
     return createHash("sha256").update(contents).digest("hex");
@@ -230,7 +240,16 @@ async function createFileFingerprint(filePath) {
   }
 }
 
-function classifySkillSource(applicationId, configuredSource, skillPath) {
+interface ClassifiedSource {
+  id: SkillSourceId;
+  displayName: string;
+}
+
+function classifySkillSource(
+  applicationId: ApplicationId,
+  configuredSource: LocationSource,
+  skillPath: string,
+): ClassifiedSource {
   if (applicationId === "chatgpt" && configuredSource === "default") {
     const isSystemSkill = skillPath.split(path.sep).includes(".system");
     return isSystemSkill
@@ -256,8 +275,13 @@ function classifySkillSource(applicationId, configuredSource, skillPath) {
   return { id: "personal", displayName: "Personal" };
 }
 
-function createAccessDiagnostic(application, location, rootPath, error) {
-  if (error.code === "ENOENT") {
+function createAccessDiagnostic(
+  application: ApplicationDefinition,
+  location: ScanLocationDefinition,
+  rootPath: string,
+  error: unknown,
+): ScanDiagnostic {
+  if (getNodeErrorCode(error) === "ENOENT") {
     return {
       application: application.id,
       location: rootPath,
@@ -271,7 +295,38 @@ function createAccessDiagnostic(application, location, rootPath, error) {
     application: application.id,
     location: rootPath,
     severity: "warning",
-    code: error.code === "EACCES" ? "PERMISSION_DENIED" : "READ_FAILED",
-    message: `Could not inspect ${location.label}: ${error.message}`,
+    code: getNodeErrorCode(error) === "EACCES" ? "PERMISSION_DENIED" : "READ_FAILED",
+    message: `Could not inspect ${location.label}: ${getErrorMessage(error)}`,
   };
+}
+
+interface ScanApplicationsOptions {
+  applications: ApplicationDefinition[];
+  maxDepth?: number;
+}
+
+interface ScanLocationOptions {
+  application: ApplicationDefinition;
+  location: ScanLocationDefinition;
+  maxDepth?: number;
+}
+
+interface WalkDirectoryOptions {
+  application: ApplicationDefinition;
+  location: ScanLocationDefinition;
+  currentPath: string;
+  depth: number;
+  maxDepth: number;
+  skills: InternalDiscoveredSkill[];
+  diagnostics: ScanDiagnostic[];
+}
+
+function getNodeErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 import os from "node:os";
+import type { ApplicationDefinition, ApplicationId, ScanLocationDefinition } from "./types.js";
 
 /**
  * Applications supported by the first version of SkillManagerOS.
@@ -8,7 +9,7 @@ import os from "node:os";
  * user or supplied by a local plugin. Both are useful, but they are different
  * sources and should remain distinguishable in the scan results.
  */
-const claudeLocations = [
+const claudeLocations: ScanLocationDefinition[] = [
   {
     label: "Claude skills",
     path: path.join(os.homedir(), ".claude", "skills"),
@@ -38,7 +39,7 @@ if (process.platform === "darwin") {
   });
 }
 
-const APPLICATIONS = {
+const APPLICATIONS: Record<ApplicationId, ApplicationDefinition> = {
   chatgpt: {
     id: "chatgpt",
     displayName: "ChatGPT",
@@ -63,11 +64,11 @@ const APPLICATIONS = {
 };
 
 /** Return a supported application, or undefined when the ID is unknown. */
-export function getApplication(applicationId) {
+export function getApplication(applicationId: ApplicationId): ApplicationDefinition {
   return APPLICATIONS[applicationId];
 }
 
 /** Return all supported application definitions. */
-export function getApplications() {
+export function getApplications(): ApplicationDefinition[] {
   return Object.values(APPLICATIONS);
 }

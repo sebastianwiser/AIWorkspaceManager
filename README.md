@@ -1,24 +1,22 @@
 # SkillManagerOS
 
-SkillManagerOS is an early, read-only command-line tool for discovering local
-AI skills installed for ChatGPT and Claude.
+SkillManagerOS is an early, read-only command-line tool for discovering local AI skills installed
+for ChatGPT and Claude.
 
-This repository currently includes **MVP 1A: local skill discovery** and
-**MVP 1B: safe metadata parsing**. The program finds folders containing
-`SKILL.md`, reads their declarative YAML frontmatter, and reports what it finds.
-It does not execute, install, modify, or remove any skill.
+This repository currently includes **MVP 1A: local skill discovery** and **MVP 1B: safe metadata
+parsing**. The program finds folders containing `SKILL.md`, reads their declarative YAML
+frontmatter, and reports what it finds. It does not execute, install, modify, or remove any skill.
 
 ## Project goals
 
-The long-term goal is to build a local-first manager for skills, plugins, and
-Model Context Protocol (MCP) connections used by AI applications. Starting with
-a small CLI lets the project validate local discovery before adding a desktop
-interface or configuration management.
+The long-term goal is to build a local-first manager for skills, plugins, and Model Context Protocol
+(MCP) connections used by AI applications. Starting with a small CLI lets the project validate local
+discovery before adding a desktop interface or configuration management.
 
 The current version answers one question:
 
-> Which local skills are installed for ChatGPT and Claude, what do they do, and
-> where did they come from?
+> Which local skills are installed for ChatGPT and Claude, what do they do, and where did they come
+> from?
 
 ## Current features
 
@@ -52,8 +50,8 @@ The current version answers one question:
 - Node.js 20 or newer.
 - macOS for the initial tested version.
 
-The scanner is written with cross-platform Node.js APIs, but Windows and Linux
-default locations have not been added or tested yet.
+The scanner is written with cross-platform Node.js APIs, but Windows and Linux default locations
+have not been added or tested yet.
 
 Check your Node.js version:
 
@@ -63,7 +61,7 @@ node --version
 
 ## Getting started
 
-Install the single runtime dependency:
+Install the project dependencies:
 
 ```bash
 npm install
@@ -107,17 +105,18 @@ Claude
   research
 ```
 
-The default output intentionally keeps the inventory easy to scan. Use
-`--details` for descriptions, sources, metadata status, and locations. Use JSON
-output when another program needs the complete records.
+The default output intentionally keeps the inventory easy to scan. Use `--details` for descriptions,
+sources, metadata status, and locations. Use JSON output when another program needs the complete
+records.
 
 ```bash
 npm run scan -- --app chatgpt --details
 ```
 
-Or run the executable file directly:
+For a production-style run, compile the TypeScript source and use the executable:
 
 ```bash
+npm run build
 node ./bin/skillmanager.js scan --app chatgpt
 ```
 
@@ -138,46 +137,45 @@ JSON output contains two arrays:
 }
 ```
 
-Each skill record includes its application, declared and folder names,
-description, source classification, metadata status, location, and modification
-time. JSON preserves separate records for same-named variants.
+Each skill record includes its application, declared and folder names, description, source
+classification, metadata status, location, and modification time. JSON preserves separate records
+for same-named variants.
 
 ## Metadata status
 
 The scanner assigns one transparent status to each local definition:
 
-| Status | Meaning |
-|---|---|
-| `valid` | The frontmatter contains string `name` and `description` fields. |
-| `incomplete` | Frontmatter parsed, but a required field is missing or invalid. |
-| `missing` | The file does not begin with YAML frontmatter. |
-| `invalid` | Frontmatter exists but cannot be parsed safely. |
-| `unreadable` | The marker was found, but its contents could not be read. |
+| Status       | Meaning                                                          |
+| ------------ | ---------------------------------------------------------------- |
+| `valid`      | The frontmatter contains string `name` and `description` fields. |
+| `incomplete` | Frontmatter parsed, but a required field is missing or invalid.  |
+| `missing`    | The file does not begin with YAML frontmatter.                   |
+| `invalid`    | Frontmatter exists but cannot be parsed safely.                  |
+| `unreadable` | The marker was found, but its contents could not be read.        |
 
-The simple view marks any non-valid definition. The detailed view explains the
-specific issue. Malformed metadata never removes a discovered skill from the
-inventory.
+The simple view marks any non-valid definition. The detailed view explains the specific issue.
+Malformed metadata never removes a discovered skill from the inventory.
 
-If several files have the same declared name and different contents, the CLI
-shows them as variants. Byte-identical session snapshots are collapsed.
+If several files have the same declared name and different contents, the CLI shows them as variants.
+Byte-identical session snapshots are collapsed.
 
 ## Default scan locations
 
 The initial macOS version checks these locations:
 
-| Application | Purpose | Location |
-|---|---|---|
-| ChatGPT | Direct skills | `~/.codex/skills` |
-| ChatGPT | Plugin-provided skills | `~/.codex/plugins` |
-| Claude | Direct skills | `~/.claude/skills` |
-| Claude | Plugin-provided skills | `~/.claude/plugins` |
+| Application    | Purpose                        | Location                                                                       |
+| -------------- | ------------------------------ | ------------------------------------------------------------------------------ |
+| ChatGPT        | Direct skills                  | `~/.codex/skills`                                                              |
+| ChatGPT        | Plugin-provided skills         | `~/.codex/plugins`                                                             |
+| Claude         | Direct skills                  | `~/.claude/skills`                                                             |
+| Claude         | Plugin-provided skills         | `~/.claude/plugins`                                                            |
 | Claude Desktop | Session/plugin skill snapshots | `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin` |
 
-A missing directory is normal. It usually means that the application has no
-local items installed in that location.
+A missing directory is normal. It usually means that the application has no local items installed in
+that location.
 
-These paths are intentionally centralized in `src/applications.js` so that
-platform-specific paths can be added without rewriting the scanner.
+These paths are intentionally centralized in `src/applications.ts` so that platform-specific paths
+can be added without rewriting the scanner.
 
 ## How discovery works
 
@@ -195,8 +193,7 @@ The scanner follows this process:
 
 ## Safety model
 
-Discovered files must be treated as untrusted input. This version follows these
-rules:
+Discovered files must be treated as untrusted input. This version follows these rules:
 
 - Never execute discovered scripts or commands.
 - Never modify discovered files.
@@ -217,27 +214,33 @@ rules:
 ```text
 SkillManagerOS/
 ├── bin/
-│   └── skillmanager.js       Command-line entry point
+│   └── skillmanager.js       Small wrapper for compiled JavaScript
 ├── src/
-│   ├── applications.js       Supported apps and default locations
-│   ├── cli.js                Arguments, interactive menu, and output
-│   ├── metadata.js           Bounded YAML frontmatter parsing
-│   └── scanner.js            Read-only filesystem discovery
+│   ├── applications.ts       Supported apps and default locations
+│   ├── cli.ts                Arguments, interactive menu, and output
+│   ├── main.ts               Development command-line entry point
+│   ├── metadata.ts           Bounded YAML frontmatter parsing
+│   ├── scanner.ts            Read-only filesystem discovery
+│   └── types.ts              Shared domain types
 ├── test/
-│   ├── cli.test.js           Command argument tests
-│   ├── metadata.test.js      Metadata parsing and edge-case tests
-│   └── scanner.test.js       Scanner behavior and safety tests
+│   ├── cli.test.ts           Command argument tests
+│   ├── metadata.test.ts      Metadata parsing and edge-case tests
+│   └── scanner.test.ts       Scanner behavior and safety tests
+├── eslint.config.js          ESLint configuration
 ├── package-lock.json         Reproducible dependency versions
 ├── package.json
+├── tsconfig.json             Strict development type checking
+├── tsconfig.build.json       Production JavaScript build
 └── README.md
 ```
 
 Keeping these responsibilities separate makes the code easier to learn:
 
-- `applications.js` answers **where should we look?**
-- `metadata.js` answers **what safe metadata does the skill declare?**
-- `scanner.js` answers **what skill markers are present?**
-- `cli.js` answers **what did the user request and how should results appear?**
+- `applications.ts` answers **where should we look?**
+- `metadata.ts` answers **what safe metadata does the skill declare?**
+- `scanner.ts` answers **what skill markers are present?**
+- `cli.ts` answers **what did the user request and how should results appear?**
+- `types.ts` defines the records shared by those modules.
 
 ## Development
 
@@ -247,20 +250,32 @@ Run the automated tests:
 npm test
 ```
 
-Check JavaScript syntax:
+Run strict type checking, linting, and a formatting check:
 
 ```bash
 npm run check
 ```
 
-The tests create temporary fake skill directories. They do not inspect or
-modify your real ChatGPT or Claude files.
+Create production JavaScript in the ignored `dist/` directory:
+
+```bash
+npm run build
+```
+
+Apply the standard formatting after editing:
+
+```bash
+npm run format
+```
+
+The tests create temporary fake skill directories. They do not inspect or modify your real ChatGPT
+or Claude files.
 
 ## Adding another default location
 
-Add a location to the appropriate application in `src/applications.js`:
+Add a location to the appropriate application in `src/applications.ts`:
 
-```js
+```ts
 {
   label: "Example skills",
   path: path.join(os.homedir(), ".example", "skills"),
@@ -276,8 +291,7 @@ The shared scanner will include it automatically.
 2. **MVP 1B — Parsing:** complete.
 3. **MVP 1C — Inventory:** add richer filtering and a desktop interface.
 4. **MVP 1D — Change detection:** identify added, removed, and modified items.
-5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe
-   management.
+5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe management.
 
 ## Contributing principles
 

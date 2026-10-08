@@ -2,6 +2,18 @@ import process from "node:process";
 import readline from "node:readline/promises";
 import { getApplication, getApplications } from "./applications.js";
 import { scanApplications } from "./scanner.js";
+import type {
+  ApplicationChoice,
+  ApplicationDefinition,
+  ApplicationId,
+  ApplicationIdentity,
+  CliIo,
+  CliOptions,
+  DiscoveredSkill,
+  MetadataStatus,
+  ScanResult,
+  SkillGroup,
+} from "./types.js";
 
 const HELP_TEXT = `SkillManagerOS - discover local AI skills
 
@@ -24,13 +36,13 @@ Examples:
 `;
 
 /** Run the command-line interface with an argv-style array. */
-export async function runCli(args, io = defaultIo()) {
-  let options;
+export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<void> {
+  let options: CliOptions;
 
   try {
     options = parseArguments(args);
   } catch (error) {
-    io.error(error.message);
+    io.error(getErrorMessage(error));
     io.error("Run skillmanager --help to see valid usage.");
     process.exitCode = 1;
     return;
@@ -56,9 +68,14 @@ export async function runCli(args, io = defaultIo()) {
   printHumanReadableResult(result, applications, options, io);
 }
 
-export function parseArguments(args) {
+export function parseArguments(args: string[]): CliOptions {
   const normalizedArgs = args[0] === "scan" ? args.slice(1) : args;
-  const options = { application: null, details: false, json: false, help: false };
+  const options: CliOptions = {
+    application: null,
+    details: false,
+    json: false,
+    help: false,
+  };
 
   for (let index = 0; index < normalizedArgs.length; index += 1) {
     const argument = normalizedArgs[index];
@@ -74,7 +91,7 @@ export function parseArguments(args) {
       if (!value || value.startsWith("--")) {
         throw new Error("--app requires chatgpt, claude, or all.");
       }
-      options.application = value.toLowerCase();
+      options.application = value.toLowerCase() as ApplicationChoice;
       index += 1;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
@@ -88,18 +105,18 @@ export function parseArguments(args) {
   return options;
 }
 
-function expandApplicationChoice(choice) {
+function expandApplicationChoice(choice: ApplicationChoice): ApplicationId[] {
   return choice === "all" ? getApplications().map((app) => app.id) : [choice];
 }
 
-async function promptForApplications(io) {
+async function promptForApplications(io: CliIo): Promise<ApplicationId[]> {
   io.write("Which application would you like to scan?\n");
   io.write("  1. ChatGPT\n");
   io.write("  2. Claude\n");
   io.write("  3. Both\n");
 
   const answer = (await io.question("Select 1, 2, or 3: ")).trim();
-  const choices = {
+  const choices: Record<string, ApplicationId[]> = {
     1: ["chatgpt"],
     2: ["claude"],
     3: ["chatgpt", "claude"],
@@ -112,14 +129,21 @@ async function promptForApplications(io) {
   return choices[answer];
 }
 
-function printHumanReadableResult(result, applications, options, io) {
+function printHumanReadableResult(
+  result: ScanResult,
+  applications: ApplicationDefinition[],
+  options: CliOptions,
+  io: CliIo,
+): void {
   const names = applications.map((application) => application.displayName).join(" and ");
   io.write(`\nScanned local ${names} skill locations.\n`);
 
   if (result.skills.length === 0) {
     io.write("\nNo local skills were found.\n");
   } else {
-    io.write(`\nFound ${result.skills.length} local skill definition${result.skills.length === 1 ? "" : "s"}:\n\n`);
+    io.write(
+      `\nFound ${result.skills.length} local skill definition${result.skills.length === 1 ? "" : "s"}:\n\n`,
+    );
     io.write(
       options.details
         ? formatDetailedSkillGroups(result.skills, applications)
@@ -127,9 +151,7 @@ function printHumanReadableResult(result, applications, options, io) {
     );
   }
 
-  const warnings = result.diagnostics.filter(
-    (diagnostic) => diagnostic.severity === "warning",
-  );
+  const warnings = result.diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
 
   if (warnings.length > 0) {
     io.write(`\nWarnings (${warnings.length}):\n`);
@@ -143,28 +165,33 @@ function printHumanReadableResult(result, applications, options, io) {
   ).length;
 
   if (missingCount > 0) {
-    io.write(`\n${missingCount} optional scan location${missingCount === 1 ? " was" : "s were"} not present.\n`);
+    io.write(
+      `\n${missingCount} optional scan location${missingCount === 1 ? " was" : "s were"} not present.\n`,
+    );
   }
 
   io.write("\nRead-only scan complete. No files were changed.\n");
 }
 
 /** Format skills as a simple list grouped by application. */
-export function formatSkillGroups(skills, applications) {
+export function formatSkillGroups(
+  skills: DiscoveredSkill[],
+  applications: ApplicationIdentity[],
+): string {
   const sections = applications.map((application) => {
     const groups = groupSkills(skills, application.id);
 
     const skillLines = groups.length
       ? groups.map((group) => {
-          const variantLabel = group.variants.length > 1
-            ? ` (${group.variants.length} variants)`
-            : "";
+          const variantLabel =
+            group.variants.length > 1 ? ` (${group.variants.length} variants)` : "";
           const invalidStatuses = group.variants
             .map((skill) => skill.metadataStatus)
             .filter((status) => status !== "valid");
-          const metadataLabel = invalidStatuses.length > 0
-            ? ` [metadata: ${[...new Set(invalidStatuses)].join(", ")}]`
-            : "";
+          const metadataLabel =
+            invalidStatuses.length > 0
+              ? ` [metadata: ${[...new Set(invalidStatuses)].join(", ")}]`
+              : "";
           return `  ${sanitizeSingleLine(group.name)}${variantLabel}${metadataLabel}`;
         })
       : ["  No local skills found."];
@@ -176,7 +203,10 @@ export function formatSkillGroups(skills, applications) {
 }
 
 /** Format the same inventory with metadata intended for human inspection. */
-export function formatDetailedSkillGroups(skills, applications) {
+export function formatDetailedSkillGroups(
+  skills: DiscoveredSkill[],
+  applications: ApplicationIdentity[],
+): string {
   const sections = applications.map((application) => {
     const groups = groupSkills(skills, application.id);
     if (groups.length === 0) {
@@ -186,16 +216,15 @@ export function formatDetailedSkillGroups(skills, applications) {
     const skillBlocks = groups.map((group) => {
       const heading = `  ${sanitizeSingleLine(group.name)}${group.variants.length > 1 ? ` (${group.variants.length} variants)` : ""}`;
       const variants = group.variants.map((skill, index) => {
-        const variantHeading = group.variants.length > 1
-          ? `    Variant ${index + 1}\n`
-          : "";
+        const variantHeading = group.variants.length > 1 ? `    Variant ${index + 1}\n` : "";
         const indent = group.variants.length > 1 ? "      " : "    ";
         const description = skill.description
           ? indentMultiline(sanitizeTerminalText(skill.description), indent)
           : "Not provided";
-        const issueLines = skill.metadataIssues.length > 0
-          ? `\n${indent}Issues: ${sanitizeSingleLine(skill.metadataIssues.join(" "))}`
-          : "";
+        const issueLines =
+          skill.metadataIssues.length > 0
+            ? `\n${indent}Issues: ${sanitizeSingleLine(skill.metadataIssues.join(" "))}`
+            : "";
 
         const lines = [
           `${indent}Description: ${description}`,
@@ -216,8 +245,8 @@ export function formatDetailedSkillGroups(skills, applications) {
   return `${sections.join("\n\n")}\n`;
 }
 
-function groupSkills(skills, applicationId) {
-  const groups = new Map();
+function groupSkills(skills: DiscoveredSkill[], applicationId: ApplicationId): SkillGroup[] {
+  const groups = new Map<string, SkillGroup>();
 
   for (const skill of skills.filter((item) => item.application === applicationId)) {
     const key = skill.name.toLocaleLowerCase();
@@ -229,32 +258,37 @@ function groupSkills(skills, applicationId) {
   return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function indentMultiline(value, indent) {
+function indentMultiline(value: string, indent: string): string {
   return value.replace(/\r?\n/g, `\n${indent}             `);
 }
 
-function capitalize(value) {
+function capitalize(value: MetadataStatus): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function sanitizeTerminalText(value) {
-  return String(value)
-    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+function sanitizeTerminalText(value: string): string {
+  return (
+    String(value)
+      // These control-character patterns intentionally prevent terminal escape injection.
+      // eslint-disable-next-line no-control-regex
+      .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "")
+  );
 }
 
-function sanitizeSingleLine(value) {
+function sanitizeSingleLine(value: string): string {
   return sanitizeTerminalText(value).replace(/\s+/g, " ").trim();
 }
 
-function shortenHomePath(filePath) {
+function shortenHomePath(filePath: string): string {
   const home = process.env.HOME;
   return home && filePath.startsWith(`${home}/`)
     ? `~/${filePath.slice(home.length + 1)}`
     : filePath;
 }
 
-function defaultIo() {
+function defaultIo(): CliIo {
   return {
     write: (text) => process.stdout.write(text),
     error: (text) => process.stderr.write(`${text}\n`),
@@ -273,4 +307,8 @@ function defaultIo() {
       }
     },
   };
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

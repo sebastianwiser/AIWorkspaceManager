@@ -46,10 +46,7 @@ test("reports invalid YAML without throwing", () => {
 });
 
 test("reports incomplete metadata", () => {
-  const result = parseSkillMetadata(
-    "---\nname: no-description\n---\n",
-    "folder-name",
-  );
+  const result = parseSkillMetadata("---\nname: no-description\n---\n", "folder-name");
 
   assert.equal(result.metadataStatus, "incomplete");
   assert.deepEqual(result.metadataIssues, ["Metadata is missing a valid description."]);

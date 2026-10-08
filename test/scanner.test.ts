@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { scanApplications, scanLocation } from "../src/scanner.js";
+import type { ApplicationDefinition, ApplicationId } from "../src/types.js";
 
-async function createTemporaryDirectory(t) {
+async function createTemporaryDirectory(t: TestContext): Promise<string> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "skillmanager-test-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
-function createApplication(id, locationPath) {
+function createApplication(id: ApplicationId, locationPath: string): ApplicationDefinition {
   return {
     id,
     displayName: id === "chatgpt" ? "ChatGPT" : "Claude",
