@@ -7,6 +7,9 @@ export type SkillSourceId =
 
 export type MetadataStatus = "valid" | "incomplete" | "missing" | "invalid" | "unreadable";
 
+export type InventorySortField = "name" | "application" | "source" | "modified";
+export type SortOrder = "asc" | "desc";
+
 export type DiagnosticCode =
   | "LOCATION_NOT_FOUND"
   | "PERMISSION_DENIED"
@@ -76,6 +79,21 @@ export interface CliOptions {
   details: boolean;
   json: boolean;
   help: boolean;
+  search: string | null;
+  sources: SkillSourceId[];
+  metadataStatuses: MetadataStatus[];
+  sortBy: InventorySortField;
+  sortOrder: SortOrder;
+}
+
+/** Options shared by the CLI today and the future desktop interface. */
+export interface InventoryOptions {
+  applicationIds?: readonly ApplicationId[];
+  query?: string | null;
+  sources?: readonly SkillSourceId[];
+  metadataStatuses?: readonly MetadataStatus[];
+  sortBy?: InventorySortField;
+  sortOrder?: SortOrder;
 }
 
 export interface CliIo {

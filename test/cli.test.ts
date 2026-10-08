@@ -28,6 +28,11 @@ test("parses a ChatGPT scan command", () => {
     details: false,
     json: false,
     help: false,
+    search: null,
+    sources: [],
+    metadataStatuses: [],
+    sortBy: "application",
+    sortOrder: "asc",
   });
 });
 
@@ -37,6 +42,11 @@ test("parses JSON output", () => {
     details: false,
     json: true,
     help: false,
+    search: null,
+    sources: [],
+    metadataStatuses: [],
+    sortBy: "application",
+    sortOrder: "asc",
   });
 });
 
@@ -46,7 +56,45 @@ test("parses detailed output", () => {
     details: true,
     json: false,
     help: false,
+    search: null,
+    sources: [],
+    metadataStatuses: [],
+    sortBy: "application",
+    sortOrder: "asc",
   });
+});
+
+test("parses inventory filters and sorting", () => {
+  assert.deepEqual(
+    parseArguments([
+      "scan",
+      "--app",
+      "all",
+      "--search",
+      "document",
+      "--source",
+      "personal,plugin",
+      "--source",
+      "system",
+      "--status",
+      "valid,incomplete",
+      "--sort",
+      "modified",
+      "--order",
+      "desc",
+    ]),
+    {
+      application: "all",
+      details: false,
+      json: false,
+      help: false,
+      search: "document",
+      sources: ["personal", "plugin", "system"],
+      metadataStatuses: ["valid", "incomplete"],
+      sortBy: "modified",
+      sortOrder: "desc",
+    },
+  );
 });
 
 test("rejects an unsupported application", () => {
@@ -55,6 +103,18 @@ test("rejects an unsupported application", () => {
 
 test("rejects unknown arguments", () => {
   assert.throws(() => parseArguments(["--unknown"]), /Unknown argument/);
+});
+
+test("rejects unsupported inventory filter values", () => {
+  assert.throws(() => parseArguments(["--source", "remote"]), /Unsupported source/);
+  assert.throws(() => parseArguments(["--status", "broken"]), /Unsupported status/);
+  assert.throws(() => parseArguments(["--sort", "size"]), /Unsupported sort/);
+  assert.throws(() => parseArguments(["--order", "sideways"]), /Unsupported order/);
+});
+
+test("requires values after inventory options", () => {
+  assert.throws(() => parseArguments(["--search"]), /--search requires a value/);
+  assert.throws(() => parseArguments(["--source", "--json"]), /--source requires a value/);
 });
 
 test("groups human-readable skill output by application", () => {

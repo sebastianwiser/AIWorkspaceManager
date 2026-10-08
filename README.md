@@ -3,9 +3,10 @@
 SkillManagerOS is an early, read-only command-line tool for discovering local AI skills installed
 for ChatGPT and Claude.
 
-This repository currently includes **MVP 1A: local skill discovery** and **MVP 1B: safe metadata
-parsing**. The program finds folders containing `SKILL.md`, reads their declarative YAML
-frontmatter, and reports what it finds. It does not execute, install, modify, or remove any skill.
+This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
+parsing**, and the command-line portion of **MVP 1C: inventory**. The program finds folders
+containing `SKILL.md`, reads their declarative YAML frontmatter, and reports what it finds. It does
+not execute, install, modify, or remove any skill.
 
 ## Project goals
 
@@ -28,6 +29,9 @@ The current version answers one question:
 - Classify personal, system, plugin, plugin-cache, and Claude Desktop sources.
 - Identify missing, incomplete, invalid, or unreadable metadata.
 - Group same-named definitions as variants without discarding either one.
+- Search names, folder names, and descriptions.
+- Filter by application, source, and metadata status.
+- Sort by name, application, source, or modification date.
 - Print a simple list grouped by application.
 - Show richer metadata with `--details`.
 - Produce JSON output for future integrations.
@@ -90,6 +94,9 @@ npm run scan -- --app chatgpt
 npm run scan -- --app claude
 npm run scan -- --app all
 npm run scan -- --app all --details
+npm run scan -- --app all --search document
+npm run scan -- --app all --source personal,plugin
+npm run scan -- --app all --status invalid,missing --sort source
 ```
 
 Human-readable results are grouped by application:
@@ -141,6 +148,35 @@ Each skill record includes its application, declared and folder names, descripti
 classification, metadata status, location, and modification time. JSON preserves separate records
 for same-named variants.
 
+## Inventory filters
+
+Filters can be combined. Values separated by commas are treated as alternatives within that filter,
+while different filters must all match.
+
+```bash
+npm run scan -- --app all --search document --source personal,plugin --status valid
+```
+
+Available source IDs are:
+
+- `personal`
+- `system`
+- `plugin`
+- `plugin-cache`
+- `claude-desktop-plugin`
+
+Available metadata statuses are `valid`, `incomplete`, `missing`, `invalid`, and `unreadable`.
+
+Sort inventory results with `--sort name`, `--sort application`, `--sort source`, or
+`--sort modified`. Add `--order desc` for descending order:
+
+```bash
+npm run scan -- --app all --sort modified --order desc --details
+```
+
+The same filters and ordering also apply to `--json` output. These operations happen after the
+read-only scan and never change local skill files.
+
 ## Metadata status
 
 The scanner assigns one transparent status to each local definition:
@@ -190,6 +226,7 @@ The scanner follows this process:
 7. Fall back to the folder name when metadata is missing or invalid.
 8. Hash `SKILL.md` in memory to collapse identical session snapshots.
 9. Classify the local source and return results with scan diagnostics.
+10. Build an inventory view by applying the requested search, filters, and ordering.
 
 ## Safety model
 
@@ -218,12 +255,14 @@ SkillManagerOS/
 ├── src/
 │   ├── applications.ts       Supported apps and default locations
 │   ├── cli.ts                Arguments, interactive menu, and output
+│   ├── inventory.ts          Reusable searching, filtering, and sorting
 │   ├── main.ts               Development command-line entry point
 │   ├── metadata.ts           Bounded YAML frontmatter parsing
 │   ├── scanner.ts            Read-only filesystem discovery
 │   └── types.ts              Shared domain types
 ├── test/
 │   ├── cli.test.ts           Command argument tests
+│   ├── inventory.test.ts     Inventory filtering and sorting tests
 │   ├── metadata.test.ts      Metadata parsing and edge-case tests
 │   └── scanner.test.ts       Scanner behavior and safety tests
 ├── eslint.config.js          ESLint configuration
@@ -237,6 +276,7 @@ SkillManagerOS/
 Keeping these responsibilities separate makes the code easier to learn:
 
 - `applications.ts` answers **where should we look?**
+- `inventory.ts` answers **which discovered skills should this view show?**
 - `metadata.ts` answers **what safe metadata does the skill declare?**
 - `scanner.ts` answers **what skill markers are present?**
 - `cli.ts` answers **what did the user request and how should results appear?**
@@ -289,7 +329,7 @@ The shared scanner will include it automatically.
 
 1. **MVP 1A — Local skill discovery:** complete.
 2. **MVP 1B — Parsing:** complete.
-3. **MVP 1C — Inventory:** add richer filtering and a desktop interface.
+3. **MVP 1C — Inventory:** command-line filtering complete; desktop interface next.
 4. **MVP 1D — Change detection:** identify added, removed, and modified items.
 5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe management.
 

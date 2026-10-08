@@ -1,6 +1,7 @@
 import process from "node:process";
 import readline from "node:readline/promises";
 import { getApplication, getApplications } from "./applications.js";
+import { createInventoryView } from "./inventory.js";
 import { scanApplications } from "./scanner.js";
 import type {
   ApplicationChoice,
@@ -10,29 +11,60 @@ import type {
   CliIo,
   CliOptions,
   DiscoveredSkill,
+  InventorySortField,
   MetadataStatus,
   ScanResult,
   SkillGroup,
+  SkillSourceId,
+  SortOrder,
 } from "./types.js";
+
+const VALID_SOURCES = [
+  "personal",
+  "system",
+  "plugin",
+  "plugin-cache",
+  "claude-desktop-plugin",
+] as const satisfies readonly SkillSourceId[];
+const VALID_METADATA_STATUSES = [
+  "valid",
+  "incomplete",
+  "missing",
+  "invalid",
+  "unreadable",
+] as const satisfies readonly MetadataStatus[];
+const VALID_SORT_FIELDS = [
+  "name",
+  "application",
+  "source",
+  "modified",
+] as const satisfies readonly InventorySortField[];
+const VALID_SORT_ORDERS = ["asc", "desc"] as const satisfies readonly SortOrder[];
 
 const HELP_TEXT = `SkillManagerOS - discover local AI skills
 
 Usage:
   skillmanager
-  skillmanager scan [--app chatgpt|claude|all] [--details] [--json]
+  skillmanager scan [options]
   skillmanager --help
 
 Options:
-  --app <name>  Choose ChatGPT, Claude, or all. If omitted, a menu is shown.
-  --details     Show descriptions, sources, metadata status, and locations.
-  --json        Print complete machine-readable JSON.
-  --help        Show this help message.
+  --app <name>       Choose chatgpt, claude, or all. If omitted, a menu is shown.
+  --search <text>    Search skill names, folder names, and descriptions.
+  --source <list>    Filter by comma-separated source IDs.
+  --status <list>    Filter by comma-separated metadata statuses.
+  --sort <field>     Sort by name, application, source, or modified.
+  --order <order>    Use ascending (asc) or descending (desc) order.
+  --details          Show descriptions, sources, metadata status, and locations.
+  --json             Print complete machine-readable JSON.
+  --help             Show this help message.
 
 Examples:
   skillmanager scan --app chatgpt
   skillmanager scan --app chatgpt --details
+  skillmanager scan --app all --search document --source personal,plugin
+  skillmanager scan --app all --status invalid,missing --sort source
   skillmanager scan --app claude --json
-  skillmanager scan --app all
 `;
 
 /** Run the command-line interface with an argv-style array. */
@@ -58,14 +90,25 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     : await promptForApplications(io);
 
   const applications = applicationIds.map(getApplication);
-  const result = await scanApplications({ applications });
+  const scanResult = await scanApplications({ applications });
+  const result: ScanResult = {
+    ...scanResult,
+    skills: createInventoryView(scanResult.skills, {
+      applicationIds,
+      query: options.search,
+      sources: options.sources,
+      metadataStatuses: options.metadataStatuses,
+      sortBy: options.sortBy,
+      sortOrder: options.sortOrder,
+    }),
+  };
 
   if (options.json) {
     io.write(`${JSON.stringify(result, null, 2)}\n`);
     return;
   }
 
-  printHumanReadableResult(result, applications, options, io);
+  printHumanReadableResult(result, applications, options, scanResult.skills.length, io);
 }
 
 export function parseArguments(args: string[]): CliOptions {
@@ -75,6 +118,11 @@ export function parseArguments(args: string[]): CliOptions {
     details: false,
     json: false,
     help: false,
+    search: null,
+    sources: [],
+    metadataStatuses: [],
+    sortBy: "application",
+    sortOrder: "asc",
   };
 
   for (let index = 0; index < normalizedArgs.length; index += 1) {
@@ -87,11 +135,33 @@ export function parseArguments(args: string[]): CliOptions {
     } else if (argument === "--details") {
       options.details = true;
     } else if (argument === "--app") {
-      const value = normalizedArgs[index + 1];
-      if (!value || value.startsWith("--")) {
-        throw new Error("--app requires chatgpt, claude, or all.");
-      }
+      const value = readOptionValue(normalizedArgs, index, "--app");
       options.application = value.toLowerCase() as ApplicationChoice;
+      index += 1;
+    } else if (argument === "--search") {
+      options.search = readOptionValue(normalizedArgs, index, "--search");
+      index += 1;
+    } else if (argument === "--source") {
+      const value = readOptionValue(normalizedArgs, index, "--source");
+      options.sources = mergeUnique(
+        options.sources,
+        parseListOption(value, VALID_SOURCES, "--source"),
+      );
+      index += 1;
+    } else if (argument === "--status") {
+      const value = readOptionValue(normalizedArgs, index, "--status");
+      options.metadataStatuses = mergeUnique(
+        options.metadataStatuses,
+        parseListOption(value, VALID_METADATA_STATUSES, "--status"),
+      );
+      index += 1;
+    } else if (argument === "--sort") {
+      const value = readOptionValue(normalizedArgs, index, "--sort");
+      options.sortBy = parseSingleOption(value, VALID_SORT_FIELDS, "--sort");
+      index += 1;
+    } else if (argument === "--order") {
+      const value = readOptionValue(normalizedArgs, index, "--order");
+      options.sortOrder = parseSingleOption(value, VALID_SORT_ORDERS, "--order");
       index += 1;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
@@ -133,17 +203,24 @@ function printHumanReadableResult(
   result: ScanResult,
   applications: ApplicationDefinition[],
   options: CliOptions,
+  totalSkillCount: number,
   io: CliIo,
 ): void {
   const names = applications.map((application) => application.displayName).join(" and ");
   io.write(`\nScanned local ${names} skill locations.\n`);
 
   if (result.skills.length === 0) {
-    io.write("\nNo local skills were found.\n");
-  } else {
     io.write(
-      `\nFound ${result.skills.length} local skill definition${result.skills.length === 1 ? "" : "s"}:\n\n`,
+      hasActiveFilters(options) && totalSkillCount > 0
+        ? "\nNo local skills matched the current filters.\n"
+        : "\nNo local skills were found.\n",
     );
+  } else {
+    const countMessage =
+      result.skills.length === totalSkillCount
+        ? `Found ${result.skills.length} local skill definition${result.skills.length === 1 ? "" : "s"}`
+        : `Found ${result.skills.length} matching local skill definition${result.skills.length === 1 ? "" : "s"} (${totalSkillCount} scanned)`;
+    io.write(`\n${countMessage}:\n\n`);
     io.write(
       options.details
         ? formatDetailedSkillGroups(result.skills, applications)
@@ -255,7 +332,61 @@ function groupSkills(skills: DiscoveredSkill[], applicationId: ApplicationId): S
     groups.set(key, group);
   }
 
-  return [...groups.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return [...groups.values()];
+}
+
+function readOptionValue(args: string[], index: number, optionName: string): string {
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    throw new Error(`${optionName} requires a value.`);
+  }
+  return value;
+}
+
+function parseListOption<T extends string>(
+  value: string,
+  validValues: readonly T[],
+  optionName: string,
+): T[] {
+  const values = value
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (values.length === 0) {
+    throw new Error(`${optionName} requires at least one value.`);
+  }
+
+  const invalidValues = values.filter((item) => !validValues.includes(item as T));
+  if (invalidValues.length > 0) {
+    throw new Error(
+      `Unsupported ${optionName.slice(2)}: ${invalidValues.join(", ")}. Valid values: ${validValues.join(", ")}.`,
+    );
+  }
+
+  return values as T[];
+}
+
+function parseSingleOption<T extends string>(
+  value: string,
+  validValues: readonly T[],
+  optionName: string,
+): T {
+  const values = parseListOption(value, validValues, optionName);
+  if (values.length !== 1) {
+    throw new Error(`${optionName} accepts one value.`);
+  }
+  return values[0];
+}
+
+function mergeUnique<T>(existing: T[], additional: T[]): T[] {
+  return [...new Set([...existing, ...additional])];
+}
+
+function hasActiveFilters(options: CliOptions): boolean {
+  return Boolean(
+    options.search || options.sources.length > 0 || options.metadataStatuses.length > 0,
+  );
 }
 
 function indentMultiline(value: string, indent: string): string {
