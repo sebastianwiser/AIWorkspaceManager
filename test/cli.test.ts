@@ -17,6 +17,10 @@ function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill 
     source: "personal",
     sourceName: "Personal",
     sourceLabel: "Test skills",
+    scope: "global",
+    projectId: null,
+    projectName: null,
+    projectRoot: null,
     modifiedAt: null,
     ...overrides,
   };
@@ -110,6 +114,10 @@ test("rejects unsupported inventory filter values", () => {
   assert.throws(() => parseArguments(["--status", "broken"]), /Unsupported status/);
   assert.throws(() => parseArguments(["--sort", "size"]), /Unsupported sort/);
   assert.throws(() => parseArguments(["--order", "sideways"]), /Unsupported order/);
+});
+
+test("accepts the project source filter", () => {
+  assert.deepEqual(parseArguments(["--source", "project"]).sources, ["project"]);
 });
 
 test("requires values after inventory options", () => {

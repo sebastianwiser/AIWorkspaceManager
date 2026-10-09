@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInventoryView } from "../src/inventory.js";
+import { createInventoryView, getSkillIdentity } from "../src/inventory.js";
 import type { DiscoveredSkill } from "../src/types.js";
 
 function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill {
@@ -17,6 +17,10 @@ function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill 
     source: "personal",
     sourceName: "Personal",
     sourceLabel: "Test skills",
+    scope: "global",
+    projectId: null,
+    projectName: null,
+    projectRoot: null,
     modifiedAt: "2026-01-02T00:00:00.000Z",
     ...overrides,
   };
@@ -46,6 +50,19 @@ test("filters skills by application, source, and metadata status", () => {
     result.map((skill) => skill.name),
     ["plugin-invalid"],
   );
+});
+
+test("gives shared skill files a separate identity for each application", () => {
+  const instructionFile = "/projects/shared/.agents/skills/example/SKILL.md";
+  const chatGptSkill = createSkill({ instructionFile });
+  const claudeSkill = createSkill({
+    application: "claude",
+    applicationName: "Claude",
+    instructionFile,
+  });
+
+  assert.notEqual(getSkillIdentity(chatGptSkill), getSkillIdentity(claudeSkill));
+  assert.equal(getSkillIdentity(chatGptSkill), getSkillIdentity({ ...chatGptSkill }));
 });
 
 test("searches names, folder names, and descriptions without case sensitivity", () => {
@@ -89,6 +106,39 @@ test("uses OR within one filter and AND between different filters", () => {
   assert.deepEqual(
     result.map((skill) => skill.name),
     ["invalid-personal", "missing-plugin"],
+  );
+});
+
+test("filters global skills and individual projects", () => {
+  const skills = [
+    createSkill({ name: "global" }),
+    createSkill({
+      name: "project-a",
+      scope: "project",
+      source: "project",
+      sourceName: "Project",
+      projectId: "project-alpha",
+      projectName: "Alpha",
+      projectRoot: "/projects/alpha",
+    }),
+    createSkill({
+      name: "project-b",
+      scope: "project",
+      source: "project",
+      sourceName: "Project",
+      projectId: "project-beta",
+      projectName: "Beta",
+      projectRoot: "/projects/beta",
+    }),
+  ];
+
+  assert.deepEqual(
+    createInventoryView(skills, { scopes: ["global"] }).map((skill) => skill.name),
+    ["global"],
+  );
+  assert.deepEqual(
+    createInventoryView(skills, { projectIds: ["project-beta"] }).map((skill) => skill.name),
+    ["project-b"],
   );
 });
 

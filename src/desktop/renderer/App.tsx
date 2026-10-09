@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createInventoryView } from "../../inventory.js";
+import { createInventoryView, getSkillIdentity } from "../../inventory.js";
 import { getRenderableMarkdown } from "../../markdown.js";
 import type {
   ApplicationChoice,
@@ -17,6 +17,7 @@ import { AlertIcon, FolderIcon, MarkIcon, RefreshIcon, SearchIcon, ShieldIcon } 
 
 type SourceFilter = SkillSourceId | "all";
 type StatusFilter = MetadataStatus | "all";
+type ProjectFilter = "all" | "global" | `project:${string}`;
 type DetailTab = "overview" | "contents";
 type ContentView = "rendered" | "source";
 
@@ -27,6 +28,7 @@ const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
   { value: "plugin", label: "Plugin" },
   { value: "plugin-cache", label: "Plugin cache" },
   { value: "claude-desktop-plugin", label: "Claude Desktop plugin" },
+  { value: "project", label: "Project" },
 ];
 
 const statusOptions: Array<{ value: StatusFilter; label: string }> = [
@@ -53,9 +55,10 @@ export function App() {
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [source, setSource] = useState<SourceFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [project, setProject] = useState<ProjectFilter>("all");
   const [sortBy, setSortBy] = useState<InventorySortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
 
   const refreshInventory = useCallback(async () => {
     setIsScanning(true);
@@ -88,24 +91,26 @@ export function App() {
       query,
       sources: source === "all" ? undefined : [source],
       metadataStatuses: status === "all" ? undefined : [status],
+      scopes: project === "global" ? ["global"] : undefined,
+      projectIds: project.startsWith("project:") ? [project.slice("project:".length)] : undefined,
       sortBy,
       sortOrder,
     });
-  }, [application, query, scanResult, sortBy, sortOrder, source, status]);
+  }, [application, project, query, scanResult, sortBy, sortOrder, source, status]);
 
   useEffect(() => {
     if (inventory.length === 0) {
-      setSelectedPath(null);
+      setSelectedSkillId(null);
       return;
     }
 
-    if (!inventory.some((skill) => skill.instructionFile === selectedPath)) {
-      setSelectedPath(inventory[0].instructionFile);
+    if (!inventory.some((skill) => getSkillIdentity(skill) === selectedSkillId)) {
+      setSelectedSkillId(getSkillIdentity(inventory[0]));
     }
-  }, [inventory, selectedPath]);
+  }, [inventory, selectedSkillId]);
 
   const selectedSkill =
-    inventory.find((skill) => skill.instructionFile === selectedPath) ?? inventory[0] ?? null;
+    inventory.find((skill) => getSkillIdentity(skill) === selectedSkillId) ?? inventory[0] ?? null;
   const allSkills = scanResult?.skills ?? [];
   const chatGptCount = allSkills.filter((skill) => skill.application === "chatgpt").length;
   const claudeCount = allSkills.filter((skill) => skill.application === "claude").length;
@@ -115,12 +120,18 @@ export function App() {
   const missingLocationCount =
     scanResult?.diagnostics.filter((item) => item.code === "LOCATION_NOT_FOUND").length ?? 0;
   const variantCounts = useMemo(() => countVariants(inventory), [inventory]);
+  const projectOptions = useMemo(() => getProjectOptions(allSkills), [allSkills]);
   const hasActiveFilters =
-    query !== "" || application !== "all" || source !== "all" || status !== "all";
+    query !== "" ||
+    application !== "all" ||
+    project !== "all" ||
+    source !== "all" ||
+    status !== "all";
 
   function clearFilters(): void {
     setQuery("");
     setApplication("all");
+    setProject("all");
     setSource("all");
     setStatus("all");
   }
@@ -221,6 +232,20 @@ export function App() {
             </SelectControl>
 
             <SelectControl
+              label="Project"
+              value={project}
+              onChange={(value) => setProject(value as ProjectFilter)}
+            >
+              <option value="all">All locations</option>
+              <option value="global">Global only</option>
+              {projectOptions.map((option) => (
+                <option key={option.id} value={`project:${option.id}`}>
+                  {option.name}
+                </option>
+              ))}
+            </SelectControl>
+
+            <SelectControl
               label="Source"
               value={source}
               onChange={(value) => setSource(value as SourceFilter)}
@@ -282,11 +307,11 @@ export function App() {
               ) : inventory.length > 0 ? (
                 inventory.map((skill) => (
                   <SkillRow
-                    key={skill.instructionFile}
+                    key={getSkillIdentity(skill)}
                     skill={skill}
-                    selected={skill.instructionFile === selectedSkill?.instructionFile}
+                    selected={getSkillIdentity(skill) === selectedSkillId}
                     variantCount={variantCounts.get(variantKey(skill)) ?? 1}
-                    onSelect={() => setSelectedPath(skill.instructionFile)}
+                    onSelect={() => setSelectedSkillId(getSkillIdentity(skill))}
                   />
                 ))
               ) : (
@@ -295,7 +320,11 @@ export function App() {
             </div>
 
             <aside className="detail-panel" aria-label="Selected skill details">
-              {selectedSkill ? <SkillDetails skill={selectedSkill} /> : <EmptyDetails />}
+              {selectedSkill ? (
+                <SkillDetails key={getSkillIdentity(selectedSkill)} skill={selectedSkill} />
+              ) : (
+                <EmptyDetails />
+              )}
             </aside>
           </div>
         </section>
@@ -362,7 +391,7 @@ function SkillRow({
         </span>
         <span>{skill.description ?? "No description provided."}</span>
         <span className="row-meta">
-          {skill.applicationName} · {skill.sourceName}
+          {skill.applicationName} · {skill.projectName ?? skill.sourceName}
         </span>
       </span>
       <span className="row-status">
@@ -465,6 +494,10 @@ function SkillOverview({ skill }: { skill: DiscoveredSkill }) {
           <dd>{skill.sourceName}</dd>
         </div>
         <div>
+          <dt>Availability</dt>
+          <dd>{skill.projectName ? `Project: ${skill.projectName}` : "Global"}</dd>
+        </div>
+        <div>
           <dt>Metadata</dt>
           <dd>
             <StatusPill status={skill.metadataStatus} />
@@ -497,6 +530,15 @@ function SkillOverview({ skill }: { skill: DiscoveredSkill }) {
         </span>
         <code>{shortenPath(skill.directory)}</code>
       </div>
+
+      {skill.projectRoot && (
+        <div className="location-block">
+          <span>
+            <FolderIcon /> Project root
+          </span>
+          <code>{shortenPath(skill.projectRoot)}</code>
+        </div>
+      )}
     </>
   );
 }
@@ -641,6 +683,22 @@ function countVariants(skills: DiscoveredSkill[]): Map<string, number> {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
+}
+
+function getProjectOptions(
+  skills: readonly DiscoveredSkill[],
+): Array<{ id: string; name: string }> {
+  const projects = new Map<string, string>();
+
+  for (const skill of skills) {
+    if (skill.projectId && skill.projectName) {
+      projects.set(skill.projectId, skill.projectName);
+    }
+  }
+
+  return [...projects.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 
 function formatDate(value: string | null): string {

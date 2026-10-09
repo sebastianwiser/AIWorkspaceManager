@@ -1,12 +1,13 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, ipcMain } from "electron";
-import { getApplications } from "../applications.js";
+import electron from "electron";
+import { getScanApplications } from "../applications.js";
 import { scanApplications } from "../scanner.js";
 import { readSkillContent } from "../skill-content.js";
 import type { DesktopScanResult, SkillContentResult } from "../types.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+const { app, BrowserWindow, ipcMain } = electron;
 const SCAN_CHANNEL = "inventory:scan";
 const READ_CONTENT_CHANNEL = "inventory:read-skill-content";
 
@@ -14,7 +15,7 @@ let allowedInstructionFiles = new Set<string>();
 
 function registerReadOnlyHandlers(): void {
   ipcMain.handle(SCAN_CHANNEL, async (): Promise<DesktopScanResult> => {
-    const result = await scanApplications({ applications: getApplications() });
+    const result = await scanApplications({ applications: await getScanApplications() });
     allowedInstructionFiles = new Set(result.skills.map((skill) => skill.instructionFile));
 
     return {
@@ -45,7 +46,7 @@ function registerReadOnlyHandlers(): void {
   );
 }
 
-function createWindow(): BrowserWindow {
+function createWindow() {
   const window = new BrowserWindow({
     width: 1240,
     height: 800,

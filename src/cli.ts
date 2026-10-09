@@ -1,6 +1,6 @@
 import process from "node:process";
 import readline from "node:readline/promises";
-import { getApplication, getApplications } from "./applications.js";
+import { getApplications, getScanApplications } from "./applications.js";
 import { createInventoryView } from "./inventory.js";
 import { scanApplications } from "./scanner.js";
 import type {
@@ -25,6 +25,7 @@ const VALID_SOURCES = [
   "plugin",
   "plugin-cache",
   "claude-desktop-plugin",
+  "project",
 ] as const satisfies readonly SkillSourceId[];
 const VALID_METADATA_STATUSES = [
   "valid",
@@ -89,7 +90,9 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     ? expandApplicationChoice(options.application)
     : await promptForApplications(io);
 
-  const applications = applicationIds.map(getApplication);
+  const applications = (await getScanApplications()).filter((application) =>
+    applicationIds.includes(application.id),
+  );
   const scanResult = await scanApplications({ applications });
   const result: ScanResult = {
     ...scanResult,

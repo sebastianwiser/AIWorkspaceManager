@@ -320,7 +320,7 @@ main {
 
 .controls {
   display: grid;
-  grid-template-columns: minmax(240px, 1.8fr) repeat(4, minmax(125px, 0.8fr)) auto;
+  grid-template-columns: minmax(210px, 1.5fr) repeat(5, minmax(110px, 0.75fr)) auto;
   gap: 10px;
   padding: 16px;
   border-bottom: 1px solid var(--line);

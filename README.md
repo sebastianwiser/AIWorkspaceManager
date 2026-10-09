@@ -23,6 +23,8 @@ The current version answers one question:
 
 - Scan ChatGPT skill and plugin directories.
 - Scan Claude skill and plugin directories.
+- Discover project-local skills from projects already registered with Codex or Claude.
+- Recognize `.codex/skills`, `.claude/skills`, and shared `.agents/skills` project folders.
 - Select one application or scan both.
 - Find direct and plugin-provided skills using the `SKILL.md` marker.
 - Read declared skill names and descriptions from YAML frontmatter.
@@ -31,6 +33,7 @@ The current version answers one question:
 - Group same-named definitions as variants without discarding either one.
 - Search names, folder names, and descriptions.
 - Filter by application, source, and metadata status.
+- Filter between global skills and each actual ChatGPT or Claude project.
 - Sort by name, application, source, or modification date.
 - Browse inventory metadata and rendered, read-only `SKILL.md` contents in a desktop interface.
 - Switch between a formatted GitHub-style Markdown preview and the original source text.
@@ -178,6 +181,7 @@ Available source IDs are:
 - `plugin`
 - `plugin-cache`
 - `claude-desktop-plugin`
+- `project`
 
 Available metadata statuses are `valid`, `incomplete`, `missing`, `invalid`, and `unreadable`.
 
@@ -221,6 +225,23 @@ The initial macOS version checks these locations:
 | Claude         | Plugin-provided skills         | `~/.claude/plugins`                                                            |
 | Claude Desktop | Session/plugin skill snapshots | `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin` |
 
+The app also reads the local Codex and Claude project registries, then checks only those known
+project roots for conventional skill folders:
+
+| Availability | Folder pattern   | Shown for          |
+| ------------ | ---------------- | ------------------ |
+| Project      | `.codex/skills`  | ChatGPT            |
+| Project      | `.claude/skills` | Claude             |
+| Project      | `.agents/skills` | ChatGPT and Claude |
+
+Nested skill folders inside a registered project are supported and remain grouped under the
+registered project name. Generated dependency folders, build output, Git internals, and archived
+copies are skipped. This keeps project discovery useful without scanning the entire home directory.
+
+Claude Desktop currently makes some built-in and installed plugin skills available through local
+session snapshots. SkillManagerOS keeps that location as a fallback, while preferring the real
+project folder for project-scoped definitions. Identical snapshots are still collapsed.
+
 A missing directory is normal. It usually means that the application has no local items installed in
 that location.
 
@@ -231,16 +252,18 @@ can be added without rewriting the scanner.
 
 The scanner follows this process:
 
-1. Load the locations associated with the selected applications.
-2. Check whether each location exists and is a readable directory.
-3. Walk through its subdirectories.
-4. Treat a directory containing `SKILL.md` as one installed skill.
-5. Stop descending into that skill because nested folders are supporting files.
-6. Parse the bounded YAML frontmatter for a declared name and description.
-7. Fall back to the folder name when metadata is missing or invalid.
-8. Hash `SKILL.md` in memory to collapse identical session snapshots.
-9. Classify the local source and return results with scan diagnostics.
-10. Build an inventory view by applying the requested search, filters, and ordering.
+1. Load project identities, names, and attached folder roots registered with Codex and Claude.
+2. Find conventional skill folders inside those known project roots.
+3. Check whether each location exists and is a readable directory.
+4. Walk through its subdirectories.
+5. Treat a directory containing `SKILL.md` as one installed skill.
+6. Stop descending into that skill because nested folders are supporting files.
+7. Parse the bounded YAML frontmatter for a declared name and description.
+8. Fall back to the folder name when metadata is missing or invalid.
+9. Hash `SKILL.md` in memory to collapse identical session snapshots within the same scope.
+10. Record whether the definition is global or belongs to a specific project.
+11. Classify the local source and return results with scan diagnostics.
+12. Build an inventory view by applying the requested search, filters, and ordering.
 
 ## Safety model
 
@@ -282,12 +305,14 @@ SkillManagerOS/
 │   ├── inventory.ts          Reusable searching, filtering, and sorting
 │   ├── main.ts               Development command-line entry point
 │   ├── metadata.ts           Bounded YAML frontmatter parsing
+│   ├── projects.ts           Safe project registry and skill-folder discovery
 │   ├── scanner.ts            Read-only filesystem discovery
 │   └── types.ts              Shared domain types
 ├── test/
 │   ├── cli.test.ts           Command argument tests
 │   ├── inventory.test.ts     Inventory filtering and sorting tests
 │   ├── metadata.test.ts      Metadata parsing and edge-case tests
+│   ├── projects.test.ts      Project discovery and boundary tests
 │   └── scanner.test.ts       Scanner behavior and safety tests
 ├── eslint.config.js          ESLint configuration
 ├── package-lock.json         Reproducible dependency versions
@@ -303,6 +328,7 @@ Keeping these responsibilities separate makes the code easier to learn:
 - `applications.ts` answers **where should we look?**
 - `inventory.ts` answers **which discovered skills should this view show?**
 - `metadata.ts` answers **what safe metadata does the skill declare?**
+- `projects.ts` answers **which known projects contain local skill folders?**
 - `scanner.ts` answers **what skill markers are present?**
 - `cli.ts` answers **what did the user request and how should results appear?**
 - `types.ts` defines the records shared by those modules.

@@ -1,9 +1,11 @@
 export type ApplicationId = "chatgpt" | "claude";
 export type ApplicationChoice = ApplicationId | "all";
 
-export type LocationSource = "default" | "plugin" | "desktop-plugin";
+export type LocationSource = "default" | "plugin" | "desktop-plugin" | "project";
 export type SkillSourceId =
-  "personal" | "system" | "plugin" | "plugin-cache" | "claude-desktop-plugin";
+  "personal" | "system" | "plugin" | "plugin-cache" | "claude-desktop-plugin" | "project";
+
+export type SkillScope = "global" | "project";
 
 export type MetadataStatus = "valid" | "incomplete" | "missing" | "invalid" | "unreadable";
 
@@ -22,6 +24,10 @@ export interface ScanLocationDefinition {
   label: string;
   path: string;
   source: LocationSource;
+  scope?: SkillScope;
+  projectId?: string;
+  projectName?: string;
+  projectRoot?: string;
 }
 
 export interface ApplicationIdentity {
@@ -49,6 +55,10 @@ export interface DiscoveredSkill extends SkillMetadata {
   source: SkillSourceId;
   sourceName: string;
   sourceLabel: string;
+  scope: SkillScope;
+  projectId: string | null;
+  projectName: string | null;
+  projectRoot: string | null;
   modifiedAt: string | null;
 }
 
@@ -109,6 +119,8 @@ export interface InventoryOptions {
   query?: string | null;
   sources?: readonly SkillSourceId[];
   metadataStatuses?: readonly MetadataStatus[];
+  scopes?: readonly SkillScope[];
+  projectIds?: readonly string[];
   sortBy?: InventorySortField;
   sortOrder?: SortOrder;
 }

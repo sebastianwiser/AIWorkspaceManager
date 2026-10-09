@@ -60,7 +60,7 @@ export async function scanApplications({
         // sessions. Name + content identifies exact mirrors without merging two
         // different skills that happen to use the same folder name.
         const identity = skill.contentFingerprint
-          ? `${skill.application}:${skill.name}:${skill.contentFingerprint}`
+          ? `${skill.application}:${skill.scope}:${skill.projectRoot ?? "global"}:${skill.name}:${skill.contentFingerprint}`
           : `${skill.application}:${skill.instructionFile}`;
 
         if (!seenSkills.has(identity)) {
@@ -193,6 +193,10 @@ async function walkDirectory({
       source: source.id,
       sourceName: source.displayName,
       sourceLabel: location.label,
+      scope: location.scope ?? "global",
+      projectId: location.projectId ?? null,
+      projectName: location.projectName ?? null,
+      projectRoot: location.projectRoot ?? null,
       modifiedAt: stats?.mtime?.toISOString() ?? null,
       contentFingerprint,
     });
@@ -266,6 +270,10 @@ function classifySkillSource(
 
   if (configuredSource === "desktop-plugin") {
     return { id: "claude-desktop-plugin", displayName: "Claude Desktop plugin" };
+  }
+
+  if (configuredSource === "project") {
+    return { id: "project", displayName: "Project" };
   }
 
   if (configuredSource === "plugin") {
