@@ -225,8 +225,9 @@ The initial macOS version checks these locations:
 | Claude         | Plugin-provided skills         | `~/.claude/plugins`                                                            |
 | Claude Desktop | Session/plugin skill snapshots | `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin` |
 
-The app also reads the local Codex and Claude project registries, then checks only those known
-project roots for conventional skill folders:
+The app also reads the local Codex and Claude project registries, including named Claude Desktop
+projects with linked folders, then checks only those known project roots for conventional skill
+folders:
 
 | Availability | Folder pattern   | Shown for          |
 | ------------ | ---------------- | ------------------ |

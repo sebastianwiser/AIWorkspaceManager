@@ -120,7 +120,10 @@ export function App() {
   const missingLocationCount =
     scanResult?.diagnostics.filter((item) => item.code === "LOCATION_NOT_FOUND").length ?? 0;
   const variantCounts = useMemo(() => countVariants(inventory), [inventory]);
-  const projectOptions = useMemo(() => getProjectOptions(allSkills), [allSkills]);
+  const projectOptions = useMemo(
+    () => getProjectOptions(allSkills, application),
+    [allSkills, application],
+  );
   const hasActiveFilters =
     query !== "" ||
     application !== "all" ||
@@ -135,6 +138,15 @@ export function App() {
     setSource("all");
     setStatus("all");
   }
+
+  useEffect(() => {
+    if (
+      project.startsWith("project:") &&
+      !projectOptions.some((option) => `project:${option.id}` === project)
+    ) {
+      setProject("all");
+    }
+  }, [project, projectOptions]);
 
   return (
     <div className="app-shell">
@@ -687,17 +699,36 @@ function countVariants(skills: DiscoveredSkill[]): Map<string, number> {
 
 function getProjectOptions(
   skills: readonly DiscoveredSkill[],
+  application: ApplicationChoice,
 ): Array<{ id: string; name: string }> {
-  const projects = new Map<string, string>();
+  const projects = new Map<string, { applicationName: string; name: string }>();
 
   for (const skill of skills) {
-    if (skill.projectId && skill.projectName) {
-      projects.set(skill.projectId, skill.projectName);
+    if (
+      skill.projectId &&
+      skill.projectName &&
+      (application === "all" || skill.application === application)
+    ) {
+      projects.set(skill.projectId, {
+        applicationName: skill.applicationName,
+        name: skill.projectName,
+      });
     }
   }
 
+  const duplicateNames = new Map<string, number>();
+  for (const project of projects.values()) {
+    duplicateNames.set(project.name, (duplicateNames.get(project.name) ?? 0) + 1);
+  }
+
   return [...projects.entries()]
-    .map(([id, name]) => ({ id, name }))
+    .map(([id, project]) => ({
+      id,
+      name:
+        application === "all" && (duplicateNames.get(project.name) ?? 0) > 1
+          ? `${project.name} — ${project.applicationName}`
+          : project.name,
+    }))
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }
 

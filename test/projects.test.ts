@@ -30,7 +30,11 @@ test("discovers app-specific and shared project skill folders", async (t) => {
   );
   await fs.writeFile(claudeStateFile, JSON.stringify({ projects: { [project]: {} } }));
 
-  const locations = await discoverProjectSkillLocations({ codexStateFile, claudeStateFile });
+  const locations = await discoverProjectSkillLocations({
+    codexStateFile,
+    claudeStateFile,
+    claudeSpacesFiles: [],
+  });
   const pairs = locations.map(
     (item) => `${item.application}:${path.basename(path.dirname(item.location.path))}`,
   );
@@ -41,8 +45,20 @@ test("discovers app-specific and shared project skill folders", async (t) => {
     "claude:.agents",
     "claude:.claude",
   ]);
-  assert.ok(locations.every((item) => item.location.projectName === "Example"));
-  assert.ok(locations.every((item) => item.location.projectId === "codex:example"));
+  assert.ok(
+    locations
+      .filter((item) => item.application === "chatgpt")
+      .every((item) => item.location.projectName === "Example"),
+  );
+  assert.ok(
+    locations
+      .filter((item) => item.application === "claude")
+      .every((item) => item.location.projectName === "example-project"),
+  );
+  assert.deepEqual(
+    [...new Set(locations.map((item) => item.location.projectId))].sort(),
+    [`claude:${project}`, "codex:example"].sort(),
+  );
   assert.ok(locations.every((item) => item.location.projectRoot === project));
 });
 
@@ -65,7 +81,11 @@ test("keeps nested skill folders grouped under their registered project", async 
     }),
   );
 
-  const locations = await discoverProjectSkillLocations({ codexStateFile, claudeStateFile });
+  const locations = await discoverProjectSkillLocations({
+    codexStateFile,
+    claudeStateFile,
+    claudeSpacesFiles: [],
+  });
 
   assert.equal(locations.length, 1);
   assert.equal(locations[0].location.projectId, "codex:workspace");
@@ -92,7 +112,11 @@ test("groups multiple attached folders under one Codex project", async (t) => {
     }),
   );
 
-  const locations = await discoverProjectSkillLocations({ codexStateFile, claudeStateFile });
+  const locations = await discoverProjectSkillLocations({
+    codexStateFile,
+    claudeStateFile,
+    claudeSpacesFiles: [],
+  });
 
   assert.equal(locations.length, 2);
   assert.ok(locations.every((item) => item.location.projectId === "codex:product"));
@@ -120,12 +144,55 @@ test("prefers the closest project when registered roots overlap", async (t) => {
       },
     }),
   );
-  await fs.writeFile(claudeStateFile, JSON.stringify({ projects: { [broadRoot]: {} } }));
+  await fs.writeFile(
+    claudeStateFile,
+    JSON.stringify({ projects: { [broadRoot]: {}, [specificRoot]: {} } }),
+  );
 
-  const locations = await discoverProjectSkillLocations({ codexStateFile, claudeStateFile });
+  const locations = await discoverProjectSkillLocations({
+    codexStateFile,
+    claudeStateFile,
+    claudeSpacesFiles: [],
+  });
   const sharedLocations = locations.filter((item) => item.location.path === skillsPath);
 
   assert.equal(sharedLocations.length, 2);
   assert.ok(sharedLocations.every((item) => item.location.projectName === "Job Apps"));
   assert.ok(sharedLocations.every((item) => item.location.projectRoot === specificRoot));
+  assert.notEqual(sharedLocations[0].location.projectId, sharedLocations[1].location.projectId);
+});
+
+test("uses Claude Desktop space names and IDs for linked folders", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const project = path.join(root, "internal-folder-name");
+  const codexStateFile = path.join(root, "missing-codex-state.json");
+  const claudeStateFile = path.join(root, "claude-state.json");
+  const spacesFile = path.join(root, "spaces.json");
+
+  await fs.mkdir(path.join(project, ".claude", "skills"), { recursive: true });
+  await fs.writeFile(claudeStateFile, JSON.stringify({ projects: { [project]: {} } }));
+  await fs.writeFile(
+    spacesFile,
+    JSON.stringify({
+      spaces: [
+        {
+          id: "space-123",
+          name: "Career Workspace",
+          folders: [{ path: project }],
+        },
+      ],
+    }),
+  );
+
+  const locations = await discoverProjectSkillLocations({
+    codexStateFile,
+    claudeStateFile,
+    claudeSpacesFiles: [spacesFile],
+  });
+
+  assert.equal(locations.length, 1);
+  assert.equal(locations[0].application, "claude");
+  assert.equal(locations[0].location.projectId, "claude-space:space-123");
+  assert.equal(locations[0].location.projectName, "Career Workspace");
+  assert.equal(locations[0].location.projectRoot, project);
 });
