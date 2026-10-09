@@ -178,10 +178,11 @@ test("sorts by application and source", () => {
   );
 });
 
-test("sorts modified dates while keeping unknown dates last", () => {
+test("sorts modified dates while keeping unavailable dates last", () => {
   const skills = [
     createSkill({ name: "older", modifiedAt: "2026-01-01T00:00:00.000Z" }),
     createSkill({ name: "unknown", modifiedAt: null }),
+    createSkill({ name: "placeholder", modifiedAt: "1970-01-01T00:00:01.000Z" }),
     createSkill({ name: "newer", modifiedAt: "2026-02-01T00:00:00.000Z" }),
   ];
 
@@ -189,7 +190,13 @@ test("sorts modified dates while keeping unknown dates last", () => {
     createInventoryView(skills, { sortBy: "modified", sortOrder: "desc" }).map(
       (skill) => skill.name,
     ),
-    ["newer", "older", "unknown"],
+    ["newer", "older", "placeholder", "unknown"],
+  );
+  assert.deepEqual(
+    createInventoryView(skills, { sortBy: "modified", sortOrder: "asc" }).map(
+      (skill) => skill.name,
+    ),
+    ["older", "newer", "placeholder", "unknown"],
   );
 });
 

@@ -2,26 +2,53 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import electron from "electron";
 import { getScanApplications } from "../applications.js";
+import {
+  compareInventorySnapshots,
+  createInventorySnapshot,
+  readInventorySnapshot,
+  writeInventorySnapshot,
+  type InventorySnapshot,
+} from "../changes.js";
 import { scanApplications } from "../scanner.js";
 import { readSkillContent } from "../skill-content.js";
-import type { DesktopScanResult, SkillContentResult } from "../types.js";
+import type { DesktopScanResult, InventoryChanges, SkillContentResult } from "../types.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const { app, BrowserWindow, ipcMain } = electron;
 const SCAN_CHANNEL = "inventory:scan";
 const READ_CONTENT_CHANNEL = "inventory:read-skill-content";
+const RESET_BASELINE_CHANNEL = "inventory:reset-baseline";
 
 let allowedInstructionFiles = new Set<string>();
+let latestSnapshot: InventorySnapshot | null = null;
 
-function registerReadOnlyHandlers(): void {
+function registerHandlers(): void {
   ipcMain.handle(SCAN_CHANNEL, async (): Promise<DesktopScanResult> => {
     const result = await scanApplications({ applications: await getScanApplications() });
+    const scannedAt = new Date().toISOString();
+    const snapshot = await createInventorySnapshot(result.skills, scannedAt);
+    const baselinePath = getBaselinePath();
+    const previousSnapshot = await readInventorySnapshot(baselinePath);
+    const changes = compareInventorySnapshots(snapshot, previousSnapshot);
+    await writeInventorySnapshot(baselinePath, snapshot);
+
+    latestSnapshot = snapshot;
     allowedInstructionFiles = new Set(result.skills.map((skill) => skill.instructionFile));
 
     return {
       ...result,
-      scannedAt: new Date().toISOString(),
+      scannedAt,
+      changes,
     };
+  });
+
+  ipcMain.handle(RESET_BASELINE_CHANNEL, async (): Promise<InventoryChanges> => {
+    if (!latestSnapshot) {
+      throw new Error("Scan the inventory before resetting its baseline.");
+    }
+
+    await writeInventorySnapshot(getBaselinePath(), latestSnapshot);
+    return compareInventorySnapshots(latestSnapshot, null);
   });
 
   ipcMain.handle(
@@ -44,6 +71,10 @@ function registerReadOnlyHandlers(): void {
       }
     },
   );
+}
+
+function getBaselinePath(): string {
+  return path.join(app.getPath("userData"), "inventory-baseline.json");
 }
 
 function createWindow() {
@@ -75,7 +106,7 @@ function createWindow() {
 app.setName("SkillManagerOS");
 
 void app.whenReady().then(() => {
-  registerReadOnlyHandlers();
+  registerHandlers();
   createWindow();
 
   app.on("activate", () => {

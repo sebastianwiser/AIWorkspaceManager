@@ -9,6 +9,8 @@ import type {
   DiscoveredSkill,
   InventorySortField,
   MetadataStatus,
+  SkillChange,
+  SkillChangeType,
   SkillContentResult,
   SkillSourceId,
   SortOrder,
@@ -20,6 +22,8 @@ type StatusFilter = MetadataStatus | "all";
 type ProjectFilter = "all" | "global" | `project:${string}`;
 type DetailTab = "overview" | "contents";
 type ContentView = "rendered" | "source";
+type InventoryMode = "inventory" | "changes";
+type ChangeFilter = SkillChangeType | "all";
 
 const sourceOptions: Array<{ value: SourceFilter; label: string }> = [
   { value: "all", label: "All sources" },
@@ -47,14 +51,25 @@ const sortOptions: Array<{ value: InventorySortField; label: string }> = [
   { value: "modified", label: "Last modified" },
 ];
 
+const changeOptions: Array<{ value: ChangeFilter; label: string }> = [
+  { value: "all", label: "All changes" },
+  { value: "added", label: "Added" },
+  { value: "modified", label: "Modified" },
+  { value: "moved", label: "Moved or renamed" },
+  { value: "removed", label: "Removed" },
+];
+
 export function App() {
   const [scanResult, setScanResult] = useState<DesktopScanResult | null>(null);
   const [isScanning, setIsScanning] = useState(true);
+  const [isResettingBaseline, setIsResettingBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<InventoryMode>("inventory");
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [source, setSource] = useState<SourceFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [changeType, setChangeType] = useState<ChangeFilter>("all");
   const [project, setProject] = useState<ProjectFilter>("all");
   const [sortBy, setSortBy] = useState<InventorySortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
@@ -81,22 +96,30 @@ export function App() {
     void refreshInventory();
   }, [refreshInventory]);
 
-  const inventory = useMemo(() => {
-    if (!scanResult) {
-      return [];
-    }
+  const allSkills = scanResult?.skills ?? [];
+  const allChanges = scanResult?.changes.items ?? [];
+  const sourceSkills = useMemo(
+    () =>
+      mode === "inventory"
+        ? allSkills
+        : allChanges
+            .filter((change) => changeType === "all" || change.type === changeType)
+            .map((change) => change.skill),
+    [allChanges, allSkills, changeType, mode],
+  );
 
-    return createInventoryView(scanResult.skills, {
+  const inventory = useMemo(() => {
+    return createInventoryView(sourceSkills, {
       applicationIds: application === "all" ? undefined : [application],
       query,
       sources: source === "all" ? undefined : [source],
-      metadataStatuses: status === "all" ? undefined : [status],
+      metadataStatuses: mode === "inventory" && status !== "all" ? [status] : undefined,
       scopes: project === "global" ? ["global"] : undefined,
       projectIds: project.startsWith("project:") ? [project.slice("project:".length)] : undefined,
       sortBy,
       sortOrder,
     });
-  }, [application, project, query, scanResult, sortBy, sortOrder, source, status]);
+  }, [application, mode, project, query, sortBy, sortOrder, source, sourceSkills, status]);
 
   useEffect(() => {
     if (inventory.length === 0) {
@@ -111,7 +134,12 @@ export function App() {
 
   const selectedSkill =
     inventory.find((skill) => getSkillIdentity(skill) === selectedSkillId) ?? inventory[0] ?? null;
-  const allSkills = scanResult?.skills ?? [];
+  const selectedChange =
+    mode === "changes" && selectedSkill
+      ? (allChanges.find(
+          (change) => getSkillIdentity(change.skill) === getSkillIdentity(selectedSkill),
+        ) ?? null)
+      : null;
   const chatGptCount = allSkills.filter((skill) => skill.application === "chatgpt").length;
   const claudeCount = allSkills.filter((skill) => skill.application === "claude").length;
   const attentionCount = allSkills.filter((skill) => skill.metadataStatus !== "valid").length;
@@ -120,16 +148,21 @@ export function App() {
   const missingLocationCount =
     scanResult?.diagnostics.filter((item) => item.code === "LOCATION_NOT_FOUND").length ?? 0;
   const variantCounts = useMemo(() => countVariants(inventory), [inventory]);
+  const projectOptionSkills = useMemo(
+    () => [...allSkills, ...allChanges.map((change) => change.skill)],
+    [allChanges, allSkills],
+  );
   const projectOptions = useMemo(
-    () => getProjectOptions(allSkills, application),
-    [allSkills, application],
+    () => getProjectOptions(projectOptionSkills, application),
+    [application, projectOptionSkills],
   );
   const hasActiveFilters =
     query !== "" ||
     application !== "all" ||
     project !== "all" ||
     source !== "all" ||
-    status !== "all";
+    (mode === "inventory" && status !== "all") ||
+    (mode === "changes" && changeType !== "all");
 
   function clearFilters(): void {
     setQuery("");
@@ -137,6 +170,29 @@ export function App() {
     setProject("all");
     setSource("all");
     setStatus("all");
+    setChangeType("all");
+  }
+
+  async function resetBaseline(): Promise<void> {
+    if (
+      !window.confirm(
+        "Use the current inventory as the new baseline? The existing change list will be cleared.",
+      )
+    ) {
+      return;
+    }
+
+    setIsResettingBaseline(true);
+    setError(null);
+    try {
+      const changes = await window.skillManager.resetBaseline();
+      setScanResult((current) => (current ? { ...current, changes } : current));
+      setMode("inventory");
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : String(resetError));
+    } finally {
+      setIsResettingBaseline(false);
+    }
   }
 
   useEffect(() => {
@@ -198,6 +254,17 @@ export function App() {
           <StatCard label="Needs attention" value={attentionCount} tone="yellow" />
         </section>
 
+        {scanResult && (
+          <ChangeSummary
+            changes={scanResult.changes.items}
+            baselineCreated={scanResult.changes.baselineCreated}
+            baselineScannedAt={scanResult.changes.baselineScannedAt}
+            onViewChanges={() => setMode("changes")}
+            onReset={() => void resetBaseline()}
+            isResetting={isResettingBaseline}
+          />
+        )}
+
         {error && (
           <div className="message error-message" role="alert">
             <AlertIcon />
@@ -221,6 +288,27 @@ export function App() {
         )}
 
         <section className="inventory-card">
+          <div className="inventory-tabs" role="tablist" aria-label="Inventory view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "inventory"}
+              className={mode === "inventory" ? "active" : ""}
+              onClick={() => setMode("inventory")}
+            >
+              Inventory
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "changes"}
+              className={mode === "changes" ? "active" : ""}
+              onClick={() => setMode("changes")}
+            >
+              Changes
+              {allChanges.length > 0 && <span>{allChanges.length}</span>}
+            </button>
+          </div>
           <div className="controls">
             <label className="search-control">
               <span className="visually-hidden">Search skills</span>
@@ -269,17 +357,31 @@ export function App() {
               ))}
             </SelectControl>
 
-            <SelectControl
-              label="Metadata"
-              value={status}
-              onChange={(value) => setStatus(value as StatusFilter)}
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </SelectControl>
+            {mode === "inventory" ? (
+              <SelectControl
+                label="Metadata"
+                value={status}
+                onChange={(value) => setStatus(value as StatusFilter)}
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SelectControl>
+            ) : (
+              <SelectControl
+                label="Change"
+                value={changeType}
+                onChange={(value) => setChangeType(value as ChangeFilter)}
+              >
+                {changeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </SelectControl>
+            )}
 
             <SelectControl
               label="Sort by"
@@ -305,7 +407,9 @@ export function App() {
 
           <div className="inventory-meta">
             <span>
-              <strong>{inventory.length}</strong> of {allSkills.length} definitions
+              <strong>{inventory.length}</strong> of{" "}
+              {mode === "inventory" ? allSkills.length : allChanges.length}{" "}
+              {mode === "inventory" ? "definitions" : "changes"}
             </span>
             {missingLocationCount > 0 && (
               <span>{missingLocationCount} optional locations not present</span>
@@ -323,17 +427,32 @@ export function App() {
                     skill={skill}
                     selected={getSkillIdentity(skill) === selectedSkillId}
                     variantCount={variantCounts.get(variantKey(skill)) ?? 1}
+                    change={
+                      mode === "changes"
+                        ? (allChanges.find(
+                            (item) => getSkillIdentity(item.skill) === getSkillIdentity(skill),
+                          ) ?? null)
+                        : null
+                    }
                     onSelect={() => setSelectedSkillId(getSkillIdentity(skill))}
                   />
                 ))
               ) : (
-                <EmptyInventory hasActiveFilters={hasActiveFilters} onClear={clearFilters} />
+                <EmptyInventory
+                  mode={mode}
+                  hasActiveFilters={hasActiveFilters}
+                  onClear={clearFilters}
+                />
               )}
             </div>
 
             <aside className="detail-panel" aria-label="Selected skill details">
               {selectedSkill ? (
-                <SkillDetails key={getSkillIdentity(selectedSkill)} skill={selectedSkill} />
+                <SkillDetails
+                  key={`${getSkillIdentity(selectedSkill)}:${selectedChange?.type ?? "inventory"}`}
+                  skill={selectedSkill}
+                  change={selectedChange}
+                />
               ) : (
                 <EmptyDetails />
               )}
@@ -347,6 +466,64 @@ export function App() {
         Local-only discovery · No skill files are executed or changed
       </footer>
     </div>
+  );
+}
+
+function ChangeSummary({
+  changes,
+  baselineCreated,
+  baselineScannedAt,
+  onViewChanges,
+  onReset,
+  isResetting,
+}: {
+  changes: readonly SkillChange[];
+  baselineCreated: boolean;
+  baselineScannedAt: string | null;
+  onViewChanges: () => void;
+  onReset: () => void;
+  isResetting: boolean;
+}) {
+  const counts = countChanges(changes);
+
+  return (
+    <section className="change-summary" aria-label="Changes since previous scan">
+      <div className="change-summary-copy">
+        <strong>
+          {baselineCreated ? "Change tracking is ready" : "Changes since your last scan"}
+        </strong>
+        <span>
+          {baselineCreated
+            ? "This scan is the baseline. Future rescans will show what changed."
+            : baselineScannedAt
+              ? `Compared with ${formatDate(baselineScannedAt)}.`
+              : "Compared with the previous inventory."}
+        </span>
+      </div>
+      {!baselineCreated && (
+        <div className="change-counts" aria-label={`${changes.length} total changes`}>
+          <span className="change-added">+{counts.added} added</span>
+          <span className="change-modified">{counts.modified} modified</span>
+          <span className="change-moved">{counts.moved} moved</span>
+          <span className="change-removed">−{counts.removed} removed</span>
+        </div>
+      )}
+      <div className="change-summary-actions">
+        {!baselineCreated && changes.length > 0 && (
+          <button type="button" className="view-changes-button" onClick={onViewChanges}>
+            View changes
+          </button>
+        )}
+        <button
+          type="button"
+          className="reset-baseline-button"
+          onClick={onReset}
+          disabled={isResetting}
+        >
+          {isResetting ? "Resetting…" : "Reset baseline"}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -384,11 +561,13 @@ function SkillRow({
   skill,
   selected,
   variantCount,
+  change,
   onSelect,
 }: {
   skill: DiscoveredSkill;
   selected: boolean;
   variantCount: number;
+  change: SkillChange | null;
   onSelect: () => void;
 }) {
   return (
@@ -407,23 +586,25 @@ function SkillRow({
         </span>
       </span>
       <span className="row-status">
+        {change && <ChangePill type={change.type} />}
         <StatusPill status={skill.metadataStatus} />
       </span>
     </button>
   );
 }
 
-function SkillDetails({ skill }: { skill: DiscoveredSkill }) {
+function SkillDetails({ skill, change }: { skill: DiscoveredSkill; change: SkillChange | null }) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [contentResult, setContentResult] = useState<SkillContentResult | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
+  const canReadContent = change?.type !== "removed";
 
   useEffect(() => {
     detailRef.current?.scrollTo({ top: 0 });
   }, [activeTab, skill.instructionFile]);
 
   useEffect(() => {
-    if (activeTab !== "contents") {
+    if (activeTab !== "contents" || !canReadContent) {
       return;
     }
 
@@ -449,7 +630,7 @@ function SkillDetails({ skill }: { skill: DiscoveredSkill }) {
     return () => {
       ignoreResult = true;
     };
-  }, [activeTab, skill.instructionFile]);
+  }, [activeTab, canReadContent, skill.instructionFile]);
 
   return (
     <div className="detail-content" ref={detailRef}>
@@ -463,7 +644,13 @@ function SkillDetails({ skill }: { skill: DiscoveredSkill }) {
         </div>
       </div>
 
-      <div className="detail-tabs" role="tablist" aria-label="Skill detail view">
+      {change && <ChangeNotice change={change} />}
+
+      <div
+        className={`detail-tabs${canReadContent ? "" : " overview-only"}`}
+        role="tablist"
+        aria-label="Skill detail view"
+      >
         <button
           type="button"
           role="tab"
@@ -473,15 +660,17 @@ function SkillDetails({ skill }: { skill: DiscoveredSkill }) {
         >
           Overview
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={activeTab === "contents"}
-          className={activeTab === "contents" ? "active" : ""}
-          onClick={() => setActiveTab("contents")}
-        >
-          Contents
-        </button>
+        {canReadContent && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "contents"}
+            className={activeTab === "contents" ? "active" : ""}
+            onClick={() => setActiveTab("contents")}
+          >
+            Contents
+          </button>
+        )}
       </div>
 
       {activeTab === "overview" ? (
@@ -489,6 +678,24 @@ function SkillDetails({ skill }: { skill: DiscoveredSkill }) {
       ) : (
         <SkillContents result={contentResult} />
       )}
+    </div>
+  );
+}
+
+function ChangeNotice({ change }: { change: SkillChange }) {
+  const message =
+    change.type === "added"
+      ? "This skill was added after the previous scan."
+      : change.type === "modified"
+        ? "The SKILL.md contents changed after the previous scan."
+        : change.type === "removed"
+          ? "This skill was removed. Its last known metadata is shown below."
+          : `Moved from ${shortenPath(change.previousSkill?.directory ?? "an earlier location")}.`;
+
+  return (
+    <div className={`change-notice change-notice-${change.type}`}>
+      <ChangePill type={change.type} />
+      <span>{message}</span>
     </div>
   );
 }
@@ -643,6 +850,10 @@ function StatusPill({ status }: { status: MetadataStatus }) {
   return <span className={`status-pill status-${status}`}>{capitalize(status)}</span>;
 }
 
+function ChangePill({ type }: { type: SkillChangeType }) {
+  return <span className={`change-pill change-${type}`}>{changeLabel(type)}</span>;
+}
+
 function LoadingList() {
   return (
     <div className="loading-list" aria-label="Scanning local skills">
@@ -654,17 +865,25 @@ function LoadingList() {
 }
 
 function EmptyInventory({
+  mode,
   hasActiveFilters,
   onClear,
 }: {
+  mode: InventoryMode;
   hasActiveFilters: boolean;
   onClear: () => void;
 }) {
+  const noChanges = mode === "changes" && !hasActiveFilters;
+
   return (
     <div className="empty-state">
       <SearchIcon />
-      <h3>No matching skills</h3>
-      <p>Try clearing the filters or searching for something else.</p>
+      <h3>{noChanges ? "No changes detected" : "No matching skills"}</h3>
+      <p>
+        {noChanges
+          ? "Your local skills match the previous scan. Rescan after making a change to compare again."
+          : "Try clearing the filters or searching for something else."}
+      </p>
       {hasActiveFilters && (
         <button type="button" onClick={onClear}>
           Clear filters
@@ -695,6 +914,25 @@ function countVariants(skills: DiscoveredSkill[]): Map<string, number> {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
+}
+
+function countChanges(changes: readonly SkillChange[]): Record<SkillChangeType, number> {
+  const counts: Record<SkillChangeType, number> = {
+    added: 0,
+    modified: 0,
+    moved: 0,
+    removed: 0,
+  };
+
+  for (const change of changes) {
+    counts[change.type] += 1;
+  }
+
+  return counts;
+}
+
+function changeLabel(type: SkillChangeType): string {
+  return type === "moved" ? "Moved" : capitalize(type);
 }
 
 function getProjectOptions(

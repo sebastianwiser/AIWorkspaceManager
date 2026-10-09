@@ -105,17 +105,30 @@ function compareOptionalDates(
   right: string | null,
   sortOrder: SortOrder,
 ): number {
-  // Unknown dates remain at the end in both directions instead of looking newest.
-  if (left === null && right === null) {
+  const leftIsUnavailable = isUnavailableDate(left);
+  const rightIsUnavailable = isUnavailableDate(right);
+
+  // Missing, invalid, and placeholder dates remain at the end in both
+  // directions instead of appearing to be the oldest or newest skills.
+  if (leftIsUnavailable && rightIsUnavailable) {
     return 0;
   }
-  if (left === null) {
+  if (leftIsUnavailable) {
     return 1;
   }
-  if (right === null) {
+  if (rightIsUnavailable) {
     return -1;
   }
 
-  const comparison = left.localeCompare(right);
+  const comparison = Date.parse(left ?? "") - Date.parse(right ?? "");
   return sortOrder === "desc" ? -comparison : comparison;
+}
+
+function isUnavailableDate(value: string | null): boolean {
+  if (!value) {
+    return true;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1970;
 }

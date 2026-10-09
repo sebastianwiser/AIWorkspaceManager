@@ -1,12 +1,12 @@
 # SkillManagerOS
 
-SkillManagerOS is an early, read-only command-line tool for discovering local AI skills installed
-for ChatGPT and Claude.
+SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills
+installed for ChatGPT and Claude.
 
 This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
-parsing**, and **MVP 1C: inventory**. The program finds folders containing `SKILL.md`, reads their
-declarative YAML frontmatter, and presents the inventory through a desktop app or CLI. It does not
-execute, install, modify, or remove any skill.
+parsing**, **MVP 1C: inventory**, and **MVP 1D: change detection**. The program finds folders
+containing `SKILL.md`, reads their declarative YAML frontmatter, and presents the inventory through
+a desktop app or CLI. It does not execute, install, modify, or remove any skill.
 
 ## Project goals
 
@@ -38,6 +38,10 @@ The current version answers one question:
 - Browse inventory metadata and rendered, read-only `SKILL.md` contents in a desktop interface.
 - Switch between a formatted GitHub-style Markdown preview and the original source text.
 - Rescan local locations from the desktop interface.
+- Compare each desktop scan with the previous scan.
+- Identify added, modified, moved or renamed, and removed skills.
+- Filter and inspect changes in a dedicated desktop view.
+- Reset the change-detection baseline after confirmation.
 - Print a simple list grouped by application.
 - Show richer metadata with `--details`.
 - Produce JSON output for future integrations.
@@ -195,6 +199,26 @@ npm run scan -- --app all --sort modified --order desc --details
 The same filters and ordering also apply to `--json` output. These operations happen after the
 read-only scan and never change local skill files.
 
+## Change detection
+
+The desktop app creates its first comparison baseline automatically. Every later rescan compares the
+current inventory with that baseline, reports what changed, and then safely advances the baseline to
+the new inventory. Changes can be filtered using the same application, project, source, search, and
+sorting controls as the main inventory.
+
+SkillManagerOS distinguishes four change types:
+
+| Change   | Meaning                                                        |
+| -------- | -------------------------------------------------------------- |
+| Added    | A new local `SKILL.md` appeared.                               |
+| Modified | The contents of a previously known `SKILL.md` changed.         |
+| Moved    | The same contents appeared at a different local path.          |
+| Removed  | A previously known local `SKILL.md` is no longer discoverable. |
+
+The baseline stores inventory metadata and SHA-256 content hashes in Electron's private application
+data directory. It does not store the contents of `SKILL.md`. The **Reset baseline** action replaces
+the comparison point with the current inventory; it never changes the discovered skill files.
+
 ## Metadata status
 
 The scanner assigns one transparent status to each local definition:
@@ -279,7 +303,7 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Parse at most 64 KB as declarative YAML frontmatter.
 - Strip terminal control sequences from human-readable output.
 - Use skill contents only to create a local fingerprint for exact deduplication.
-- Never save or transmit the fingerprinted contents.
+- Save only one-way content hashes in the local baseline, never the skill contents themselves.
 - Never follow symbolic links.
 - Never scan the entire home directory.
 - Skip `.git`, `node_modules`, build output, and similar directories.
@@ -287,7 +311,8 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Continue when an optional location is missing or unreadable.
 - Do not send scan results over the network.
 - Keep filesystem access in Electron's main process.
-- Expose only a narrow, read-only scan function to the desktop interface.
+- Expose only narrow inventory, content-preview, and baseline-reset functions to the desktop
+  interface.
 - Disable renderer Node.js access, new windows, and web navigation.
 
 ## Project structure
@@ -298,6 +323,7 @@ SkillManagerOS/
 │   └── skillmanager.js       Small wrapper for compiled JavaScript
 ├── src/
 │   ├── applications.ts       Supported apps and default locations
+│   ├── changes.ts            Local snapshots and change comparison
 │   ├── cli.ts                Arguments, interactive menu, and output
 │   ├── desktop/
 │   │   ├── main.ts           Secure Electron main process
@@ -311,6 +337,7 @@ SkillManagerOS/
 │   └── types.ts              Shared domain types
 ├── test/
 │   ├── cli.test.ts           Command argument tests
+│   ├── changes.test.ts       Snapshot and change-detection tests
 │   ├── inventory.test.ts     Inventory filtering and sorting tests
 │   ├── metadata.test.ts      Metadata parsing and edge-case tests
 │   ├── projects.test.ts      Project discovery and boundary tests
@@ -327,6 +354,7 @@ SkillManagerOS/
 Keeping these responsibilities separate makes the code easier to learn:
 
 - `applications.ts` answers **where should we look?**
+- `changes.ts` answers **what changed since the previous desktop scan?**
 - `inventory.ts` answers **which discovered skills should this view show?**
 - `metadata.ts` answers **what safe metadata does the skill declare?**
 - `projects.ts` answers **which known projects contain local skill folders?**
@@ -383,7 +411,8 @@ The shared scanner will include it automatically.
 1. **MVP 1A — Local skill discovery:** complete.
 2. **MVP 1B — Parsing:** complete.
 3. **MVP 1C — Inventory:** complete with reusable filtering, CLI controls, and a desktop interface.
-4. **MVP 1D — Change detection:** identify added, removed, and modified items.
+4. **MVP 1D — Change detection:** complete with local baselines and added, modified, moved, and
+   removed skill views.
 5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe management.
 
 ## Contributing principles

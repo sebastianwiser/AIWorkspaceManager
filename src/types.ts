@@ -81,6 +81,22 @@ export interface ScanResult {
 
 export interface DesktopScanResult extends ScanResult {
   scannedAt: string;
+  changes: InventoryChanges;
+}
+
+export type SkillChangeType = "added" | "modified" | "moved" | "removed";
+
+export interface SkillChange {
+  type: SkillChangeType;
+  skill: DiscoveredSkill;
+  previousSkill: DiscoveredSkill | null;
+}
+
+export interface InventoryChanges {
+  baselineCreated: boolean;
+  baselineScannedAt: string | null;
+  comparedAt: string;
+  items: SkillChange[];
 }
 
 export interface SkillContent {
@@ -94,6 +110,7 @@ export type SkillContentResult = ({ ok: true } & SkillContent) | { ok: false; er
 export interface DesktopApi {
   scan(): Promise<DesktopScanResult>;
   readSkillContent(instructionFile: string): Promise<SkillContentResult>;
+  resetBaseline(): Promise<InventoryChanges>;
 }
 
 export interface LocationScanResult {
