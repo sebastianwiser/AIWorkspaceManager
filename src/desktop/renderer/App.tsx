@@ -9,6 +9,8 @@ import {
 } from "../../inventory.js";
 import { createMcpCapabilityGroups, createSkillCapabilityGroups } from "../../capabilities.js";
 import { getRenderableMarkdown } from "../../markdown.js";
+import { createTextDiff } from "../../text-diff.js";
+import type { TextDiffResult } from "../../text-diff.js";
 import type {
   ApplicationChoice,
   CapabilityGroup,
@@ -1218,6 +1220,15 @@ function SkillVariantSelector({
   selectedVariant: SkillVariantGroup;
   onSelect: (id: string) => void;
 }) {
+  const [showDiff, setShowDiff] = useState(false);
+  const [comparisonId, setComparisonId] = useState(
+    capability.variants.find((variant) => variant.id !== selectedVariant.id)?.id ?? "",
+  );
+  const comparisonVariant =
+    capability.variants.find(
+      (variant) => variant.id === comparisonId && variant.id !== selectedVariant.id,
+    ) ?? capability.variants.find((variant) => variant.id !== selectedVariant.id);
+
   return (
     <section className="variant-section" aria-label="Skill variants">
       <div className="variant-section-heading">
@@ -1259,6 +1270,173 @@ function SkillVariantSelector({
         ))}
       </div>
       <code className="variant-path">{shortenPath(selectedVariant.instructionFile)}</code>
+
+      {capability.variants.length > 1 && comparisonVariant && (
+        <div className="variant-compare">
+          <div className="variant-compare-actions">
+            <button
+              type="button"
+              className={`compare-toggle${showDiff ? " active" : ""}`}
+              aria-expanded={showDiff}
+              onClick={() => setShowDiff((current) => !current)}
+            >
+              {showDiff ? "Hide comparison" : "Compare variants"}
+            </button>
+            {showDiff && capability.variants.length > 2 && (
+              <label className="compare-select">
+                <span>Compare with</span>
+                <select
+                  value={comparisonVariant.id}
+                  onChange={(event) => setComparisonId(event.target.value)}
+                >
+                  {capability.variants
+                    .filter((variant) => variant.id !== selectedVariant.id)
+                    .map((variant) => (
+                      <option key={variant.id} value={variant.id}>
+                        {getVariantLabel(capability, variant)}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
+          </div>
+          {showDiff && (
+            <VariantDiffPanel
+              capability={capability}
+              leftVariant={selectedVariant}
+              rightVariant={comparisonVariant}
+            />
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+type VariantDiffState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; diff: TextDiffResult; sourceTruncated: boolean };
+
+function VariantDiffPanel({
+  capability,
+  leftVariant,
+  rightVariant,
+}: {
+  capability: SkillCapabilityGroup;
+  leftVariant: SkillVariantGroup;
+  rightVariant: SkillVariantGroup;
+}) {
+  const [state, setState] = useState<VariantDiffState>({ status: "loading" });
+
+  useEffect(() => {
+    let ignoreResult = false;
+    setState({ status: "loading" });
+
+    void Promise.all([
+      window.skillManager.readSkillContent(leftVariant.instructionFile),
+      window.skillManager.readSkillContent(rightVariant.instructionFile),
+    ])
+      .then(([left, right]) => {
+        if (ignoreResult) return;
+        if (!left.ok || !right.ok) {
+          setState({
+            status: "error",
+            message: !left.ok
+              ? left.error
+              : !right.ok
+                ? right.error
+                : "The variants could not be read.",
+          });
+          return;
+        }
+        setState({
+          status: "ready",
+          diff: createTextDiff(left.content, right.content),
+          sourceTruncated: left.truncated || right.truncated,
+        });
+      })
+      .catch((error: unknown) => {
+        if (!ignoreResult) {
+          setState({
+            status: "error",
+            message: error instanceof Error ? error.message : "The variants could not be compared.",
+          });
+        }
+      });
+
+    return () => {
+      ignoreResult = true;
+    };
+  }, [leftVariant.instructionFile, rightVariant.instructionFile]);
+
+  if (state.status === "loading") {
+    return (
+      <div className="diff-message" role="status">
+        <RefreshIcon className="spinning" /> Comparing local files…
+      </div>
+    );
+  }
+
+  if (state.status === "error") {
+    return (
+      <div className="diff-message diff-error" role="alert">
+        <AlertIcon /> {state.message}
+      </div>
+    );
+  }
+
+  const leftLabel = getVariantLabel(capability, leftVariant);
+  const rightLabel = getVariantLabel(capability, rightVariant);
+  const isBounded = state.diff.truncated || state.sourceTruncated;
+
+  return (
+    <section
+      className="variant-diff-panel"
+      aria-label={`${leftLabel} and ${rightLabel} differences`}
+    >
+      <div className="diff-heading">
+        <div>
+          <strong>{leftLabel}</strong>
+          <span>compared with</span>
+          <strong>{rightLabel}</strong>
+        </div>
+        <div className="diff-totals" aria-label="Difference totals">
+          <span className="diff-removed-total">−{state.diff.removed}</span>
+          <span className="diff-added-total">+{state.diff.added}</span>
+        </div>
+      </div>
+
+      {state.diff.identical ? (
+        <div className="diff-identical">These variants have identical contents.</div>
+      ) : (
+        <div className="diff-lines" role="table" aria-label="Line differences">
+          {state.diff.lines.map((line, index) =>
+            line.type === "skipped" ? (
+              <div className="diff-skipped" key={`skip:${index}`} role="row">
+                {line.content}
+              </div>
+            ) : (
+              <div
+                className={`diff-line diff-line-${line.type}`}
+                key={`${line.type}:${index}`}
+                role="row"
+              >
+                <span className="diff-line-number">{line.oldLine ?? ""}</span>
+                <span className="diff-line-number">{line.newLine ?? ""}</span>
+                <span className="diff-symbol">
+                  {line.type === "added" ? "+" : line.type === "removed" ? "−" : ""}
+                </span>
+                <code>{line.content || " "}</code>
+              </div>
+            ),
+          )}
+        </div>
+      )}
+
+      {isBounded && (
+        <p className="diff-notice">Comparison limited to the first 800 lines of each preview.</p>
+      )}
     </section>
   );
 }
@@ -1517,6 +1695,10 @@ function getVariantRepresentative(variant: SkillVariantGroup): DiscoveredSkill {
     variant.definitions.find((definition) => definition.metadataStatus === "valid") ??
     variant.definitions[0]
   );
+}
+
+function getVariantLabel(capability: SkillCapabilityGroup, variant: SkillVariantGroup): string {
+  return `Variant ${capability.variants.findIndex((item) => item.id === variant.id) + 1}`;
 }
 
 function getCapabilityMetadataStatus(capability: SkillCapabilityGroup): MetadataStatus {

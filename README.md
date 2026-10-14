@@ -199,7 +199,8 @@ relationship and portability views.
 Skills are displayed as one block per capability instead of one row per application record. Each
 block shows its ChatGPT and Claude availability. When matching definitions live in more than one
 local file, the detail panel provides a variant switch and shows which application, source, project,
-and file belong to the selected variant.
+and file belong to the selected variant. A read-only comparison view highlights added and removed
+lines between variants while collapsing long unchanged sections.
 
 ## MCP inventory
 

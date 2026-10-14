@@ -1237,6 +1237,245 @@ main {
   white-space: nowrap;
 }
 
+.variant-compare {
+  margin-top: 12px;
+  padding-top: 11px;
+  border-top: 1px solid #e1e1da;
+}
+
+.variant-compare-actions {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compare-toggle {
+  padding: 6px 8px;
+  color: #25624e;
+  border: 1px solid #c6d7ce;
+  border-radius: 7px;
+  background: #edf5f0;
+  font-size: 9px;
+  font-weight: 740;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease;
+}
+
+.compare-toggle:hover,
+.compare-toggle.active {
+  color: #fff;
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.compare-toggle:active {
+  transform: translateY(1px);
+}
+
+.compare-toggle:focus-visible,
+.compare-select select:focus {
+  outline: 2px solid rgb(36 126 90 / 24%);
+  outline-offset: 1px;
+}
+
+.compare-select {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.compare-select span {
+  color: #858a82;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compare-select select {
+  min-width: 104px;
+  height: 28px;
+  padding: 0 24px 0 8px;
+  color: #424942;
+  border: 1px solid #d5d7d0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 9px;
+}
+
+.variant-diff-panel {
+  margin-top: 11px;
+  overflow: hidden;
+  border: 1px solid #d8dad3;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.diff-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  border-bottom: 1px solid #dedfd9;
+  background: #f3f3ee;
+}
+
+.diff-heading > div:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 9px;
+}
+
+.diff-heading strong {
+  color: #353d36;
+}
+
+.diff-heading > div:first-child span {
+  color: #858a82;
+}
+
+.diff-totals {
+  display: flex;
+  flex: none;
+  gap: 5px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.diff-added-total {
+  color: #176346;
+}
+
+.diff-removed-total {
+  color: #94453b;
+}
+
+.diff-lines {
+  max-height: 300px;
+  overflow: auto;
+  background: #fafaf7;
+  scrollbar-gutter: stable;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 28px 28px 16px minmax(0, 1fr);
+  min-height: 24px;
+  align-items: start;
+  border-bottom: 1px solid rgb(222 223 217 / 58%);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.diff-line:last-child {
+  border-bottom: 0;
+}
+
+.diff-line-number,
+.diff-symbol {
+  min-height: 24px;
+  padding: 5px 4px;
+  color: #92978f;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-symbol {
+  color: #767c74;
+  text-align: center;
+}
+
+.diff-line code {
+  min-width: 0;
+  padding: 5px 7px;
+  overflow-wrap: anywhere;
+  color: #4a514a;
+  white-space: pre-wrap;
+}
+
+.diff-line-added {
+  background: #e8f3ec;
+}
+
+.diff-line-added .diff-symbol,
+.diff-line-added code {
+  color: #175c42;
+}
+
+.diff-line-removed {
+  background: #f7e9e5;
+}
+
+.diff-line-removed .diff-symbol,
+.diff-line-removed code {
+  color: #873e35;
+}
+
+.diff-skipped {
+  padding: 6px 10px;
+  color: #8a8f87;
+  border-block: 1px dashed #dcddd6;
+  background: #f1f1ec;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  text-align: center;
+}
+
+.diff-message,
+.diff-identical {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: #697069;
+  border: 1px dashed #d5d7d0;
+  border-radius: 8px;
+  background: #f7f7f2;
+  font-size: 9px;
+}
+
+.diff-message svg {
+  width: 14px;
+  height: 14px;
+}
+
+.diff-error {
+  color: #7d3c34;
+  border-color: #e2c3bd;
+  background: #faece8;
+}
+
+.diff-identical {
+  min-height: 72px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  color: #315f4d;
+  background: #edf5f0;
+}
+
+.diff-notice {
+  margin: 0;
+  padding: 7px 10px;
+  color: #795d18;
+  border-top: 1px solid #e4d59e;
+  background: #faf1d3;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
 .detail-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
