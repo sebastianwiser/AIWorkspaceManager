@@ -561,10 +561,11 @@ function McpInventoryPanel({
   const selected =
     filtered.find((server) => getMcpServerIdentity(server) === selectedId) ?? filtered[0] ?? null;
   const invalidCount = servers.filter((server) => server.status !== "valid").length;
-  const warningCount =
+  const mcpWarnings =
     scanResult?.diagnostics.filter(
       (diagnostic) => diagnostic.severity === "warning" && diagnostic.code.startsWith("MCP_"),
-    ).length ?? 0;
+    ) ?? [];
+  const warningCount = mcpWarnings.length;
   const hasFilters = query !== "" || application !== "all" || project !== "all";
 
   return (
@@ -615,9 +616,17 @@ function McpInventoryPanel({
       {!error && warningCount > 0 && (
         <div className="message warning-message" role="status">
           <AlertIcon />
-          <span>
-            {warningCount} MCP configuration warning{warningCount === 1 ? "" : "s"} need attention.
-          </span>
+          <div>
+            <strong>
+              {warningCount} MCP configuration warning{warningCount === 1 ? "" : "s"} need
+              attention.
+            </strong>
+            {mcpWarnings.slice(0, 3).map((warning) => (
+              <span key={`${warning.code}:${warning.location}:${warning.message}`}>
+                {warning.message} ({shortenPath(warning.location)})
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
