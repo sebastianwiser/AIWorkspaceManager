@@ -109,6 +109,10 @@ test("parses MCP inventory output", () => {
   assert.equal(parseArguments(["scan", "--kind", "mcp", "--app", "all"]).kind, "mcp");
 });
 
+test("parses plugin inventory output", () => {
+  assert.equal(parseArguments(["scan", "--kind", "plugins", "--app", "all"]).kind, "plugins");
+});
+
 test("rejects an unsupported application", () => {
   assert.throws(() => parseArguments(["scan", "--app", "other"]), /Unsupported application/);
 });

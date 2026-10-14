@@ -1,13 +1,14 @@
 # SkillManagerOS
 
-SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills and
-MCP server configurations installed for ChatGPT and Claude.
+SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills,
+plugins, and MCP server configurations installed for ChatGPT and Claude.
 
 This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
-parsing**, **MVP 1C: inventory**, **MVP 1D: change detection**, and **MVP 2A: local MCP discovery**.
-The program finds folders containing `SKILL.md`, reads declarative skill metadata, and inventories
-local MCP configuration without starting a server or exposing configured secret values. It does not
-execute, install, modify, or remove any discovered item.
+parsing**, **MVP 1C: inventory**, **MVP 1D: change detection**, **MVP 2A: local MCP discovery**, and
+**MVP 2C: plugin inventory**. The program finds folders containing `SKILL.md`, reads declarative
+skill and plugin metadata, and inventories local MCP configuration without starting a server or
+exposing configured secret values. It does not execute, install, modify, or remove any discovered
+item.
 
 ## Project goals
 
@@ -15,13 +16,16 @@ The long-term goal is to build a local-first manager for skills, plugins, and Mo
 (MCP) connections used by AI applications. The project starts with read-only local discovery so its
 inventory behavior can be validated before configuration management is added.
 
-The current version answers two questions:
+The current version answers three questions:
 
 > Which local skills are installed for ChatGPT and Claude, what do they do, and where did they come
 > from?
 
 > Which MCP servers are configured for those applications and projects, and how are they intended to
 > connect?
+
+> Which plugins are installed, where did they come from, and which skills, MCP servers, apps, and
+> hooks do they include?
 
 ## Current features
 
@@ -63,10 +67,15 @@ The current version answers two questions:
 - Group same-named skills and MCP configurations into explainable cross-app capability candidates.
 - Distinguish strong local evidence (a shared file or endpoint) from a name-only match that needs
   review.
+- Discover installed, synced, bundled, and skills-directory plugins without treating marketplace
+  catalogs as installations.
+- Parse portable, Codex, and Claude plugin manifests using bounded, read-only file access.
+- Search and filter plugins by application, project, and manifest status.
+- Show plugin version, publisher, source, scope, provenance, and local manifest location.
+- Connect each plugin to its discovered skills and packaged MCP servers, apps, and hooks.
 
 ## What it does not do yet
 
-- Discover plugin manifests as inventory items.
 - Test whether an MCP server is running or an endpoint responds.
 - Discover cloud-managed connections.
 - Audit skill security.
@@ -171,12 +180,13 @@ Use `--json` when another program needs to consume the results:
 node ./bin/skillmanager.js scan --app all --json
 ```
 
-JSON output contains three arrays:
+JSON output contains four arrays:
 
 ```json
 {
   "skills": [],
   "mcpServers": [],
+  "plugins": [],
   "diagnostics": []
 }
 ```
@@ -187,6 +197,9 @@ for same-named variants.
 
 MCP records contain only sanitized commands, arguments, URLs, and configuration excerpts. Literal
 environment and header values are never included.
+
+Plugin records contain manifest metadata, installation provenance, and references to included
+components. Marketplace listings that are not installed are intentionally omitted.
 
 ## Cross-app identity
 
@@ -204,10 +217,10 @@ lines between variants while collapsing long unchanged sections.
 
 ## MCP inventory
 
-Use the **Skills | MCP Servers** switch in the desktop app, or `--kind mcp` in the CLI. MCP servers
-can be searched and filtered by application and project. The detail view shows the inferred
-transport, safe endpoint summary, declared environment-variable and header names, configuration
-location, validation notes, and a sanitized source excerpt.
+Use the **Skills | MCP Servers | Plugins** switch in the desktop app, or `--kind mcp` in the CLI.
+MCP servers can be searched and filtered by application and project. The detail view shows the
+inferred transport, safe endpoint summary, declared environment-variable and header names,
+configuration location, validation notes, and a sanitized source excerpt.
 
 The read-only MCP scan checks these local configuration sources when present:
 
@@ -222,6 +235,19 @@ The read-only MCP scan checks these local configuration sources when present:
 Missing configuration files are normal and remain silent. Malformed files, invalid server
 definitions, and duplicate names in the same application and scope produce warnings. The scan never
 starts a command, opens a connection, checks reachability, or modifies configuration.
+
+## Plugin inventory
+
+Use the **Plugins** view in the desktop app, or `--kind plugins` in the CLI. The inventory
+recognizes portable root `plugin.json` manifests plus the `.codex-plugin/plugin.json` and
+`.claude-plugin/plugin.json` compatibility formats. It reads installed Codex bundles, Claude install
+records, Claude synced plugins, and plugin manifests loaded from Claude skills directories.
+
+The detail view shows the installed version, publisher, source, scope, manifest format, provenance,
+and the skills, packaged MCP servers, apps, and hooks found inside the bundle. Discovery never loads
+plugin code or runs a hook, command, or MCP server. Claude marketplace repositories are catalogs;
+their entries appear only when an install record or synced bundle proves that the plugin is locally
+installed.
 
 ## Inventory filters
 
@@ -342,7 +368,8 @@ The scanner follows this process:
 9. Hash `SKILL.md` in memory to collapse identical session snapshots within the same scope.
 10. Record whether the definition is global or belongs to a specific project.
 11. Classify the local source and return results with scan diagnostics.
-12. Build an inventory view by applying the requested search, filters, and ordering.
+12. Inspect bounded plugin manifests and connect their packaged components to the owning plugin.
+13. Build an inventory view by applying the requested search, filters, and ordering.
 
 ## Safety model
 
@@ -479,8 +506,10 @@ The shared scanner will include it automatically.
    desktop/CLI inventory views.
 6. **Cross-app identity foundation:** capability candidates now connect app-specific skill and MCP
    records with explicit match evidence.
-7. **Later pillars:** MCP status, plugin inspection, full relationship views, auditing, portability,
-   and safe management.
+7. **MVP 2C — Plugin inventory:** complete with installed-state-aware discovery, component
+   relationships, filtering, and desktop/CLI inventory views.
+8. **Later pillars:** MCP status, full relationship views, auditing, portability, and safe
+   management.
 
 ## Contributing principles
 

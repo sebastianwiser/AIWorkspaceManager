@@ -78,9 +78,9 @@ test("finds plugin-provided skills in nested directories", async (t) => {
   await fs.mkdir(skillDirectory, { recursive: true });
   await fs.writeFile(path.join(skillDirectory, "SKILL.md"), "# Review\n");
 
-  const result = await scanApplications({
-    applications: [createApplication("claude", root)],
-  });
+  const application = createApplication("claude", root);
+  application.locations[0].source = "plugin";
+  const result = await scanApplications({ applications: [application] });
 
   assert.equal(result.skills.length, 1);
   assert.equal(result.skills[0].name, "review");
@@ -97,6 +97,37 @@ test("does not scan inside node_modules", async (t) => {
   });
 
   assert.equal(result.skills.length, 0);
+});
+
+test("does not treat marketplace catalog skills as installed", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const catalogSkill = path.join(root, "marketplaces", "official", "plugins", "catalog-skill");
+  const installedSkill = path.join(
+    root,
+    "cache",
+    "official",
+    "installed",
+    "1.0.0",
+    "skills",
+    "ready",
+  );
+  await Promise.all([
+    fs.mkdir(catalogSkill, { recursive: true }),
+    fs.mkdir(installedSkill, { recursive: true }),
+  ]);
+  await Promise.all([
+    fs.writeFile(path.join(catalogSkill, "SKILL.md"), "# Catalog only\n"),
+    fs.writeFile(path.join(installedSkill, "SKILL.md"), "# Installed\n"),
+  ]);
+
+  const application = createApplication("claude", root);
+  application.locations[0].source = "plugin";
+  const result = await scanApplications({ applications: [application] });
+
+  assert.deepEqual(
+    result.skills.map((skill) => skill.name),
+    ["ready"],
+  );
 });
 
 test("does not follow symbolic links", async (t) => {

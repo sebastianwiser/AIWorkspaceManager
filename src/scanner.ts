@@ -23,6 +23,7 @@ const DEFAULT_MAX_DEPTH = 10;
 // belongs to the parent package. Skipping them makes scans faster and safer.
 const IGNORED_DIRECTORY_NAMES = new Set([
   ".git",
+  ".trash",
   "node_modules",
   "coverage",
   "dist",
@@ -40,7 +41,7 @@ const IGNORED_DIRECTORY_NAMES = new Set([
 export async function scanApplications({
   applications,
   maxDepth = DEFAULT_MAX_DEPTH,
-}: ScanApplicationsOptions): Promise<Omit<ScanResult, "mcpServers">> {
+}: ScanApplicationsOptions): Promise<Omit<ScanResult, "mcpServers" | "plugins">> {
   const skills: DiscoveredSkill[] = [];
   const diagnostics: ScanDiagnostic[] = [];
   const seenSkills = new Set<string>();
@@ -207,7 +208,11 @@ async function walkDirectory({
   }
 
   for (const entry of entries) {
-    if (!entry.isDirectory() || IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+    if (
+      !entry.isDirectory() ||
+      IGNORED_DIRECTORY_NAMES.has(entry.name) ||
+      shouldIgnorePluginStateDirectory(location, depth, entry.name)
+    ) {
       continue;
     }
 
@@ -222,6 +227,18 @@ async function walkDirectory({
       diagnostics,
     });
   }
+}
+
+function shouldIgnorePluginStateDirectory(
+  location: ScanLocationDefinition,
+  depth: number,
+  directoryName: string,
+): boolean {
+  return (
+    location.source === "plugin" &&
+    depth === 0 &&
+    (directoryName === "marketplaces" || directoryName === "data")
+  );
 }
 
 async function safeStat(filePath: string): Promise<Stats | null> {

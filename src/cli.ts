@@ -1,8 +1,11 @@
 import process from "node:process";
 import readline from "node:readline/promises";
 import { getApplications, getScanApplications } from "./applications.js";
-import { createInventoryView } from "./inventory.js";
-import { createMcpInventoryView } from "./inventory.js";
+import {
+  createInventoryView,
+  createMcpInventoryView,
+  createPluginInventoryView,
+} from "./inventory.js";
 import { scanLocalInventory } from "./inventory-scan.js";
 import type {
   ApplicationChoice,
@@ -13,6 +16,7 @@ import type {
   CliOptions,
   DiscoveredSkill,
   DiscoveredMcpServer,
+  DiscoveredPlugin,
   InventoryKind,
   InventorySortField,
   MetadataStatus,
@@ -45,7 +49,7 @@ const VALID_SORT_FIELDS = [
 ] as const satisfies readonly InventorySortField[];
 const VALID_SORT_ORDERS = ["asc", "desc"] as const satisfies readonly SortOrder[];
 
-const HELP_TEXT = `SkillManagerOS - discover local AI skills and MCP servers
+const HELP_TEXT = `SkillManagerOS - discover local AI skills, plugins, and MCP servers
 
 Usage:
   skillmanager
@@ -54,7 +58,7 @@ Usage:
 
 Options:
   --app <name>       Choose chatgpt, claude, or all. If omitted, a menu is shown.
-  --kind <kind>      Show skills (default) or mcp servers.
+  --kind <kind>      Show skills (default), mcp servers, or plugins.
   --search <text>    Search skill names, folder names, and descriptions.
   --source <list>    Filter by comma-separated source IDs.
   --status <list>    Filter by comma-separated metadata statuses.
@@ -67,6 +71,7 @@ Options:
 Examples:
   skillmanager scan --app chatgpt
   skillmanager scan --kind mcp --app all --details
+  skillmanager scan --kind plugins --app all --details
   skillmanager scan --app chatgpt --details
   skillmanager scan --app all --search document --source personal,plugin
   skillmanager scan --app all --status invalid,missing --sort source
@@ -113,6 +118,10 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
       applicationIds,
       query: options.search,
     }),
+    plugins: createPluginInventoryView(scanResult.plugins, {
+      applicationIds,
+      query: options.search,
+    }),
   };
 
   if (options.json) {
@@ -124,7 +133,11 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     result,
     applications,
     options,
-    options.kind === "mcp" ? scanResult.mcpServers.length : scanResult.skills.length,
+    options.kind === "mcp"
+      ? scanResult.mcpServers.length
+      : options.kind === "plugins"
+        ? scanResult.plugins.length
+        : scanResult.skills.length,
     io,
   );
 }
@@ -156,7 +169,7 @@ export function parseArguments(args: string[]): CliOptions {
     } else if (argument === "--kind") {
       options.kind = parseSingleOption(
         readOptionValue(normalizedArgs, index, "--kind"),
-        ["skills", "mcp"] as const satisfies readonly InventoryKind[],
+        ["skills", "mcp", "plugins"] as const satisfies readonly InventoryKind[],
         "--kind",
       );
       index += 1;
@@ -237,6 +250,10 @@ function printHumanReadableResult(
     printMcpResult(result.mcpServers, result.diagnostics, names, options, totalSkillCount, io);
     return;
   }
+  if (options.kind === "plugins") {
+    printPluginResult(result.plugins, result.diagnostics, names, options, totalSkillCount, io);
+    return;
+  }
 
   io.write(`\nScanned local ${names} skill locations.\n`);
 
@@ -279,6 +296,52 @@ function printHumanReadableResult(
   }
 
   io.write("\nRead-only scan complete. No files were changed.\n");
+}
+
+function printPluginResult(
+  plugins: DiscoveredPlugin[],
+  diagnostics: ScanResult["diagnostics"],
+  names: string,
+  options: CliOptions,
+  totalCount: number,
+  io: CliIo,
+): void {
+  io.write(`\nScanned local ${names} plugin installations.\n`);
+  if (plugins.length === 0) {
+    io.write(
+      options.search && totalCount > 0
+        ? "\nNo plugins matched the current filters.\n"
+        : "\nNo installed plugins were found.\n",
+    );
+  } else {
+    io.write(`\nFound ${plugins.length} installed plugin${plugins.length === 1 ? "" : "s"}:\n\n`);
+    for (const application of ["chatgpt", "claude"] as const) {
+      const applicationPlugins = plugins.filter((plugin) => plugin.application === application);
+      if (applicationPlugins.length === 0) continue;
+      io.write(`${application === "chatgpt" ? "ChatGPT" : "Claude"}\n`);
+      for (const plugin of applicationPlugins) {
+        const version = plugin.version ? ` v${sanitizeSingleLine(plugin.version)}` : "";
+        io.write(`  ${sanitizeSingleLine(plugin.displayName)}${version} [${plugin.status}]\n`);
+        if (options.details) {
+          io.write(`    Source: ${sanitizeSingleLine(plugin.originName)}\n`);
+          io.write(`    Skills: ${plugin.skills.length}\n`);
+          io.write(`    MCP servers: ${plugin.mcpServers.length}\n`);
+          io.write(`    Location: ${sanitizeSingleLine(shortenHomePath(plugin.directory))}\n`);
+        }
+      }
+      io.write("\n");
+    }
+  }
+
+  const warnings = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "warning" && diagnostic.code.startsWith("PLUGIN_"),
+  );
+  if (warnings.length > 0) {
+    io.write(`Warnings (${warnings.length}):\n`);
+    for (const warning of warnings) io.write(`  - ${sanitizeSingleLine(warning.message)}\n`);
+    io.write("\n");
+  }
+  io.write("Read-only scan complete. No plugin component was executed or changed.\n");
 }
 
 function printMcpResult(

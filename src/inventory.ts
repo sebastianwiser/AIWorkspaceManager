@@ -1,9 +1,11 @@
 import type {
   DiscoveredMcpServer,
+  DiscoveredPlugin,
   DiscoveredSkill,
   InventoryOptions,
   InventorySortField,
   McpInventoryOptions,
+  PluginInventoryOptions,
   SortOrder,
 } from "./types.js";
 
@@ -19,6 +21,54 @@ export function getSkillIdentity(skill: DiscoveredSkill): string {
 
 export function getMcpServerIdentity(server: DiscoveredMcpServer): string {
   return `${server.application}\u0000${server.scope}\u0000${server.projectId ?? "global"}\u0000${server.name}\u0000${server.configurationFile}`;
+}
+
+export function getPluginIdentity(plugin: DiscoveredPlugin): string {
+  return `${plugin.application}\u0000${plugin.directory}`;
+}
+
+/** Filter first-class plugin inventory without reading or executing plugin contents. */
+export function createPluginInventoryView(
+  plugins: readonly DiscoveredPlugin[],
+  options: PluginInventoryOptions = {},
+): DiscoveredPlugin[] {
+  const query = options.query?.trim().toLocaleLowerCase() ?? "";
+  const applicationIds = new Set(options.applicationIds ?? []);
+  const scopes = new Set(options.scopes ?? []);
+  const projectIds = new Set(options.projectIds ?? []);
+  const statuses = new Set(options.statuses ?? []);
+
+  return plugins
+    .filter((plugin) => {
+      if (applicationIds.size > 0 && !applicationIds.has(plugin.application)) return false;
+      if (scopes.size > 0 && !scopes.has(plugin.scope)) return false;
+      if (projectIds.size > 0 && (!plugin.projectId || !projectIds.has(plugin.projectId))) {
+        return false;
+      }
+      if (statuses.size > 0 && !statuses.has(plugin.status)) return false;
+      return (
+        query === "" ||
+        [
+          plugin.name,
+          plugin.displayName,
+          plugin.description ?? "",
+          plugin.author ?? "",
+          plugin.originName,
+          ...plugin.skills.map((skill) => skill.name),
+          ...plugin.mcpServers.map((server) => server.name),
+          ...plugin.apps,
+        ]
+          .join("\n")
+          .toLocaleLowerCase()
+          .includes(query)
+      );
+    })
+    .sort(
+      (left, right) =>
+        left.displayName.localeCompare(right.displayName, undefined, { sensitivity: "base" }) ||
+        left.application.localeCompare(right.application) ||
+        left.directory.localeCompare(right.directory),
+    );
 }
 
 /** Filter MCP inventory without exposing configuration values or performing I/O. */

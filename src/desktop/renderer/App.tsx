@@ -4,7 +4,9 @@ import remarkGfm from "remark-gfm";
 import {
   createInventoryView,
   createMcpInventoryView,
+  createPluginInventoryView,
   getMcpServerIdentity,
+  getPluginIdentity,
   getSkillIdentity,
 } from "../../inventory.js";
 import { createMcpCapabilityGroups, createSkillCapabilityGroups } from "../../capabilities.js";
@@ -16,12 +18,14 @@ import type {
   CapabilityGroup,
   DesktopScanResult,
   DiscoveredMcpServer,
+  DiscoveredPlugin,
   DiscoveredSkill,
   InventoryKind,
   InventorySortField,
   McpStatus,
   McpCapabilityGroup,
   MetadataStatus,
+  PluginStatus,
   SkillChange,
   SkillChangeType,
   SkillContentResult,
@@ -266,6 +270,14 @@ export function App() {
           >
             MCP Servers
           </button>
+          <button
+            type="button"
+            className={inventoryKind === "plugins" ? "active" : ""}
+            aria-current={inventoryKind === "plugins" ? "page" : undefined}
+            onClick={() => setInventoryKind("plugins")}
+          >
+            Plugins
+          </button>
         </nav>
 
         <div className="titlebar-actions">
@@ -288,6 +300,13 @@ export function App() {
       <main>
         {inventoryKind === "mcp" ? (
           <McpInventoryPanel
+            scanResult={scanResult}
+            isScanning={isScanning}
+            error={error}
+            onRetry={refreshInventory}
+          />
+        ) : inventoryKind === "plugins" ? (
+          <PluginInventoryPanel
             scanResult={scanResult}
             isScanning={isScanning}
             error={error}
@@ -536,8 +555,447 @@ export function App() {
 
       <footer>
         <ShieldIcon />
-        Local-only discovery · No skills or MCP servers are executed or changed
+        Local-only discovery · No skills, plugins, or MCP servers are executed or changed
       </footer>
+    </div>
+  );
+}
+
+function PluginInventoryPanel({
+  scanResult,
+  isScanning,
+  error,
+  onRetry,
+}: {
+  scanResult: DesktopScanResult | null;
+  isScanning: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [application, setApplication] = useState<ApplicationChoice>("all");
+  const [project, setProject] = useState<ProjectFilter>("all");
+  const [status, setStatus] = useState<PluginStatus | "all">("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const plugins = scanResult?.plugins ?? [];
+  const projects = useMemo(
+    () => getPluginProjectOptions(plugins, application),
+    [application, plugins],
+  );
+  const filtered = useMemo(
+    () =>
+      createPluginInventoryView(plugins, {
+        applicationIds: application === "all" ? undefined : [application],
+        query,
+        scopes: project === "global" ? ["global"] : undefined,
+        projectIds: project.startsWith("project:") ? [project.slice("project:".length)] : undefined,
+        statuses: status === "all" ? undefined : [status],
+      }),
+    [application, plugins, project, query, status],
+  );
+
+  useEffect(() => {
+    if (filtered.length === 0) {
+      setSelectedId(null);
+    } else if (!filtered.some((plugin) => getPluginIdentity(plugin) === selectedId)) {
+      setSelectedId(getPluginIdentity(filtered[0]));
+    }
+  }, [filtered, selectedId]);
+
+  useEffect(() => {
+    if (
+      project.startsWith("project:") &&
+      !projects.some((option) => `project:${option.id}` === project)
+    ) {
+      setProject("all");
+    }
+  }, [project, projects]);
+
+  const selected =
+    filtered.find((plugin) => getPluginIdentity(plugin) === selectedId) ?? filtered[0] ?? null;
+  const attentionCount = plugins.filter((plugin) => plugin.status !== "valid").length;
+  const pluginWarnings =
+    scanResult?.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "warning" && diagnostic.code.startsWith("PLUGIN_"),
+    ) ?? [];
+  const hasFilters = query !== "" || application !== "all" || project !== "all" || status !== "all";
+
+  function clearFilters(): void {
+    setQuery("");
+    setApplication("all");
+    setProject("all");
+    setStatus("all");
+  }
+
+  return (
+    <>
+      <section className="intro-row" aria-labelledby="plugin-heading">
+        <div>
+          <p className="section-kicker">PLUGIN INVENTORY</p>
+          <h2 id="plugin-heading">See the packages behind your capabilities.</h2>
+          <p>
+            Review installed bundles and the skills, MCP servers, apps, and hooks they bring with
+            them.
+          </p>
+        </div>
+        {scanResult && (
+          <p className="scan-time">
+            Last scanned{" "}
+            <time dateTime={scanResult.scannedAt}>{formatTime(scanResult.scannedAt)}</time>
+          </p>
+        )}
+      </section>
+
+      <section className="summary-strip" aria-label="Plugin inventory summary">
+        <SummaryMetric label="Installed plugins" value={plugins.length} tone="ink" />
+        <SummaryMetric
+          label="Included skills"
+          value={plugins.reduce((total, plugin) => total + plugin.skills.length, 0)}
+          tone="green"
+        />
+        <SummaryMetric
+          label="Packaged MCP"
+          value={plugins.reduce((total, plugin) => total + plugin.mcpServers.length, 0)}
+          tone="orange"
+        />
+        <SummaryMetric
+          label="Connected apps"
+          value={plugins.reduce((total, plugin) => total + plugin.apps.length, 0)}
+          tone="ink"
+        />
+        <SummaryMetric label="Needs attention" value={attentionCount} tone="yellow" />
+      </section>
+
+      {error && (
+        <div className="message error-message" role="alert">
+          <AlertIcon />
+          <div>
+            <strong>The local inventory could not be scanned.</strong>
+            <span>{error}</span>
+          </div>
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      )}
+      {!error && pluginWarnings.length > 0 && (
+        <div className="message warning-message" role="status">
+          <AlertIcon />
+          <div>
+            <strong>
+              {pluginWarnings.length} plugin warning{pluginWarnings.length === 1 ? "" : "s"} need
+              attention.
+            </strong>
+            {pluginWarnings.slice(0, 3).map((warning) => (
+              <span key={`${warning.location}:${warning.message}`}>
+                {warning.message} ({shortenPath(warning.location)})
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <section className="inventory-card">
+        <div className="controls plugin-controls">
+          <label className="search-control">
+            <span className="visually-hidden">Search plugins and included components</span>
+            <SearchIcon />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search plugins or components"
+            />
+          </label>
+          <SelectControl
+            label="Application"
+            value={application}
+            onChange={(value) => setApplication(value as ApplicationChoice)}
+          >
+            <option value="all">All applications</option>
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+          </SelectControl>
+          <SelectControl
+            label="Project"
+            value={project}
+            onChange={(value) => setProject(value as ProjectFilter)}
+          >
+            <option value="all">All locations</option>
+            <option value="global">Global only</option>
+            {projects.map((option) => (
+              <option key={option.id} value={`project:${option.id}`}>
+                {option.name}
+              </option>
+            ))}
+          </SelectControl>
+          <SelectControl
+            label="Manifest"
+            value={status}
+            onChange={(value) => setStatus(value as PluginStatus | "all")}
+          >
+            <option value="all">All manifests</option>
+            <option value="valid">Valid</option>
+            <option value="incomplete">Incomplete</option>
+            <option value="invalid">Invalid</option>
+          </SelectControl>
+          {hasFilters && (
+            <button className="order-button" type="button" onClick={clearFilters}>
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="inventory-meta">
+          <span>
+            <strong>{filtered.length}</strong> of {plugins.length} installed plugins
+          </span>
+          <span>Marketplace catalogs are excluded</span>
+        </div>
+        <div className="inventory-layout">
+          <div className="skill-list" aria-label="Installed plugins">
+            {isScanning && !scanResult ? (
+              <LoadingList />
+            ) : filtered.length > 0 ? (
+              filtered.map((plugin) => (
+                <PluginRow
+                  key={getPluginIdentity(plugin)}
+                  plugin={plugin}
+                  selected={getPluginIdentity(plugin) === selectedId}
+                  onSelect={() => setSelectedId(getPluginIdentity(plugin))}
+                />
+              ))
+            ) : (
+              <div className="empty-state">
+                <h3>
+                  {hasFilters ? "No plugins match these filters" : "No installed plugins found"}
+                </h3>
+                <p>
+                  {hasFilters
+                    ? "Clear the filters to see the complete plugin inventory."
+                    : "Install or sync a plugin in ChatGPT or Claude, then rescan."}
+                </p>
+                {hasFilters && (
+                  <button type="button" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <aside className="detail-panel" aria-label="Selected plugin details">
+            {selected ? <PluginDetails plugin={selected} /> : <EmptyPluginDetails />}
+          </aside>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function PluginRow({
+  plugin,
+  selected,
+  onSelect,
+}: {
+  plugin: DiscoveredPlugin;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const componentCount =
+    plugin.skills.length +
+    plugin.mcpServers.length +
+    plugin.apps.length +
+    (plugin.hasHooks ? 1 : 0);
+  return (
+    <button
+      className={`skill-row plugin-row${selected ? " selected" : ""}`}
+      type="button"
+      onClick={onSelect}
+    >
+      <span className={`app-monogram app-${plugin.application}`}>
+        {plugin.application === "chatgpt" ? "G" : "C"}
+      </span>
+      <span className="skill-row-copy">
+        <span className="skill-name-line">
+          <strong>{plugin.displayName}</strong>
+          {plugin.version && <span className="plugin-version">v{plugin.version}</span>}
+        </span>
+        <span>{plugin.description ?? "No description provided"}</span>
+        <span className="row-meta">
+          {plugin.applicationName} · {plugin.originName} · {componentCount}{" "}
+          {componentCount === 1 ? "component" : "components"}
+        </span>
+      </span>
+      <span className="row-status">
+        <PluginStatusPill status={plugin.status} />
+      </span>
+    </button>
+  );
+}
+
+function PluginDetails({ plugin }: { plugin: DiscoveredPlugin }) {
+  return (
+    <div className="detail-content">
+      <div className="detail-heading">
+        <span className="plugin-detail-mark">P</span>
+        <div>
+          <p>{plugin.applicationName} plugin</p>
+          <h3>{plugin.displayName}</h3>
+        </div>
+      </div>
+
+      <p className="detail-description">
+        {plugin.description ?? "This plugin does not provide a description."}
+      </p>
+
+      <dl className="detail-list">
+        <div>
+          <dt>Status</dt>
+          <dd>
+            <PluginStatusPill status={plugin.status} />
+          </dd>
+        </div>
+        <div>
+          <dt>Version</dt>
+          <dd>{plugin.version ?? "Not declared"}</dd>
+        </div>
+        <div>
+          <dt>Publisher</dt>
+          <dd>{plugin.author ?? "Not declared"}</dd>
+        </div>
+        <div>
+          <dt>Source</dt>
+          <dd>{plugin.originName}</dd>
+        </div>
+        <div>
+          <dt>Availability</dt>
+          <dd>{plugin.projectName ? `Project: ${plugin.projectName}` : "Global"}</dd>
+        </div>
+        <div>
+          <dt>Manifest</dt>
+          <dd>{capitalize(plugin.manifestFormat)}</dd>
+        </div>
+      </dl>
+
+      {plugin.issues.length > 0 && (
+        <div className="issues-box">
+          <strong>Manifest notes</strong>
+          <ul>
+            {plugin.issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <PluginComponents plugin={plugin} />
+
+      {(plugin.license || plugin.homepage || plugin.repository) && (
+        <section className="plugin-provenance" aria-label="Plugin provenance">
+          <strong>Provenance</strong>
+          {plugin.license && <span>License · {plugin.license}</span>}
+          {plugin.repository && <code>{plugin.repository}</code>}
+          {!plugin.repository && plugin.homepage && <code>{plugin.homepage}</code>}
+        </section>
+      )}
+
+      <div className="location-block">
+        <span>
+          <FolderIcon /> Plugin location
+        </span>
+        <code>{shortenPath(plugin.directory)}</code>
+      </div>
+      <div className="location-block">
+        <span>
+          <FolderIcon /> Manifest file
+        </span>
+        <code>{shortenPath(plugin.manifestFile)}</code>
+      </div>
+    </div>
+  );
+}
+
+function PluginComponents({ plugin }: { plugin: DiscoveredPlugin }) {
+  const isEmpty =
+    plugin.skills.length === 0 &&
+    plugin.mcpServers.length === 0 &&
+    plugin.apps.length === 0 &&
+    !plugin.hasHooks;
+
+  return (
+    <section className="plugin-components" aria-label="Included plugin components">
+      <div className="plugin-components-heading">
+        <span>Included components</span>
+        <strong>
+          {plugin.skills.length +
+            plugin.mcpServers.length +
+            plugin.apps.length +
+            (plugin.hasHooks ? 1 : 0)}
+        </strong>
+      </div>
+      {isEmpty ? (
+        <p className="plugin-components-empty">No supported components were detected.</p>
+      ) : (
+        <div className="component-groups">
+          {plugin.skills.length > 0 && (
+            <PluginComponentGroup
+              label="Skills"
+              count={plugin.skills.length}
+              names={plugin.skills.map((skill) => skill.name)}
+            />
+          )}
+          {plugin.mcpServers.length > 0 && (
+            <PluginComponentGroup
+              label="MCP servers"
+              count={plugin.mcpServers.length}
+              names={plugin.mcpServers.map((server) => server.name)}
+            />
+          )}
+          {plugin.apps.length > 0 && (
+            <PluginComponentGroup label="Apps" count={plugin.apps.length} names={plugin.apps} />
+          )}
+          {plugin.hasHooks && (
+            <PluginComponentGroup label="Hooks" count={1} names={["Lifecycle hooks"]} />
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PluginComponentGroup({
+  label,
+  count,
+  names,
+}: {
+  label: string;
+  count: number;
+  names: readonly string[];
+}) {
+  return (
+    <section className="component-group">
+      <div>
+        <strong>{label}</strong>
+        <span>{count}</span>
+      </div>
+      <ul>
+        {names.map((name) => (
+          <li key={name}>{name}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function PluginStatusPill({ status }: { status: PluginStatus }) {
+  return <span className={`status-pill status-${status}`}>{capitalize(status)}</span>;
+}
+
+function EmptyPluginDetails() {
+  return (
+    <div className="empty-details">
+      <span className="plugin-detail-mark">P</span>
+      <h3>Select a plugin</h3>
+      <p>Its publisher, source, manifest, and included components will appear here.</p>
     </div>
   );
 }
@@ -1779,6 +2237,40 @@ function getMcpProjectOptions(
       projects.set(server.projectId, {
         applicationName: server.applicationName,
         name: server.projectName,
+      });
+    }
+  }
+
+  const duplicateNames = new Map<string, number>();
+  for (const item of projects.values()) {
+    duplicateNames.set(item.name, (duplicateNames.get(item.name) ?? 0) + 1);
+  }
+
+  return [...projects.entries()]
+    .map(([id, item]) => ({
+      id,
+      name:
+        application === "all" && (duplicateNames.get(item.name) ?? 0) > 1
+          ? `${item.name} — ${item.applicationName}`
+          : item.name,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function getPluginProjectOptions(
+  plugins: readonly DiscoveredPlugin[],
+  application: ApplicationChoice,
+): Array<{ id: string; name: string }> {
+  const projects = new Map<string, { applicationName: string; name: string }>();
+  for (const plugin of plugins) {
+    if (
+      plugin.projectId &&
+      plugin.projectName &&
+      (application === "all" || plugin.application === application)
+    ) {
+      projects.set(plugin.projectId, {
+        applicationName: plugin.applicationName,
+        name: plugin.projectName,
       });
     }
   }

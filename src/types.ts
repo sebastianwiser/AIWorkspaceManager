@@ -6,10 +6,13 @@ export type SkillSourceId =
   "personal" | "system" | "plugin" | "plugin-cache" | "claude-desktop-plugin" | "project";
 
 export type SkillScope = "global" | "project";
-export type InventoryKind = "skills" | "mcp";
+export type InventoryKind = "skills" | "mcp" | "plugins";
 export type McpTransport = "stdio" | "http" | "sse" | "unknown";
 export type McpConfigurationFormat = "json" | "toml";
 export type McpStatus = "valid" | "invalid" | "duplicate";
+export type PluginStatus = "valid" | "incomplete" | "invalid";
+export type PluginOrigin = "bundled" | "marketplace" | "local" | "synced" | "skills-directory";
+export type PluginManifestFormat = "portable" | "codex" | "claude";
 export type CapabilityMatchBasis =
   "single-application" | "shared-location" | "shared-endpoint" | "matching-name";
 
@@ -27,7 +30,9 @@ export type DiagnosticCode =
   | "MAX_DEPTH_REACHED"
   | "MCP_CONFIG_INVALID"
   | "MCP_SERVER_INVALID"
-  | "MCP_SERVER_DUPLICATE";
+  | "MCP_SERVER_DUPLICATE"
+  | "PLUGIN_MANIFEST_INVALID"
+  | "PLUGIN_RECORD_INVALID";
 
 export interface ScanLocationDefinition {
   label: string;
@@ -86,6 +91,7 @@ export interface ScanDiagnostic {
 export interface ScanResult {
   skills: DiscoveredSkill[];
   mcpServers: DiscoveredMcpServer[];
+  plugins: DiscoveredPlugin[];
   diagnostics: ScanDiagnostic[];
 }
 
@@ -108,6 +114,45 @@ export interface DiscoveredMcpServer {
   safeConfiguration: string;
   status: McpStatus;
   issues: string[];
+}
+
+export interface PluginSkillReference {
+  name: string;
+  instructionFile: string;
+}
+
+export interface PluginMcpReference {
+  name: string;
+  configurationFile: string;
+}
+
+export interface DiscoveredPlugin {
+  application: ApplicationId;
+  applicationName: string;
+  name: string;
+  displayName: string;
+  version: string | null;
+  description: string | null;
+  author: string | null;
+  license: string | null;
+  homepage: string | null;
+  repository: string | null;
+  scope: SkillScope;
+  projectId: string | null;
+  projectName: string | null;
+  projectRoot: string | null;
+  origin: PluginOrigin;
+  originName: string;
+  directory: string;
+  manifestFile: string;
+  manifestFormat: PluginManifestFormat;
+  skills: PluginSkillReference[];
+  mcpServers: PluginMcpReference[];
+  apps: string[];
+  hasHooks: boolean;
+  status: PluginStatus;
+  issues: string[];
+  modifiedAt: string | null;
 }
 
 export interface SkillCapabilityGroup {
@@ -195,6 +240,14 @@ export interface McpInventoryOptions {
   query?: string | null;
   scopes?: readonly SkillScope[];
   projectIds?: readonly string[];
+}
+
+export interface PluginInventoryOptions {
+  applicationIds?: readonly ApplicationId[];
+  query?: string | null;
+  scopes?: readonly SkillScope[];
+  projectIds?: readonly string[];
+  statuses?: readonly PluginStatus[];
 }
 
 /** Options shared by the CLI today and the future desktop interface. */

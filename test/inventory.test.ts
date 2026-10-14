@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInventoryView, createMcpInventoryView, getSkillIdentity } from "../src/inventory.js";
-import type { DiscoveredMcpServer, DiscoveredSkill } from "../src/types.js";
+import {
+  createInventoryView,
+  createMcpInventoryView,
+  createPluginInventoryView,
+  getSkillIdentity,
+} from "../src/inventory.js";
+import type { DiscoveredMcpServer, DiscoveredPlugin, DiscoveredSkill } from "../src/types.js";
 
 function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill {
   return {
@@ -46,6 +51,38 @@ function createMcpServer(overrides: Partial<DiscoveredMcpServer> = {}): Discover
     safeConfiguration: "",
     status: "valid",
     issues: [],
+    ...overrides,
+  };
+}
+
+function createPlugin(overrides: Partial<DiscoveredPlugin> = {}): DiscoveredPlugin {
+  return {
+    application: "chatgpt",
+    applicationName: "ChatGPT",
+    name: "documents",
+    displayName: "Documents",
+    version: "1.0.0",
+    description: "Create and edit documents.",
+    author: "OpenAI",
+    license: "MIT",
+    homepage: null,
+    repository: null,
+    scope: "global",
+    projectId: null,
+    projectName: null,
+    projectRoot: null,
+    origin: "bundled",
+    originName: "OpenAI bundled",
+    directory: "/tmp/documents",
+    manifestFile: "/tmp/documents/.codex-plugin/plugin.json",
+    manifestFormat: "codex",
+    skills: [{ name: "documents", instructionFile: "/tmp/documents/skills/documents/SKILL.md" }],
+    mcpServers: [],
+    apps: [],
+    hasHooks: false,
+    status: "valid",
+    issues: [],
+    modifiedAt: "2026-01-02T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -266,5 +303,36 @@ test("filters MCP servers by application, project, and search text", () => {
   assert.deepEqual(
     createMcpInventoryView(servers, { scopes: ["global"] }).map((server) => server.name),
     ["docs"],
+  );
+});
+
+test("filters plugins and searches their included components", () => {
+  const plugins = [
+    createPlugin(),
+    createPlugin({
+      application: "claude",
+      applicationName: "Claude",
+      name: "research",
+      displayName: "Research",
+      directory: "/tmp/research",
+      manifestFile: "/tmp/research/.claude-plugin/plugin.json",
+      scope: "project",
+      projectId: "claude:project",
+      projectName: "Research project",
+      projectRoot: "/tmp/project",
+      status: "incomplete",
+      skills: [],
+      mcpServers: [{ name: "paper-search", configurationFile: "/tmp/research/.mcp.json" }],
+    }),
+  ];
+
+  assert.deepEqual(
+    createPluginInventoryView(plugins, {
+      applicationIds: ["claude"],
+      projectIds: ["claude:project"],
+      statuses: ["incomplete"],
+      query: "paper-search",
+    }).map((plugin) => plugin.name),
+    ["research"],
   );
 });
