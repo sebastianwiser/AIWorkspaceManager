@@ -1,4 +1,11 @@
-import type { DiscoveredSkill, InventoryOptions, InventorySortField, SortOrder } from "./types.js";
+import type {
+  DiscoveredMcpServer,
+  DiscoveredSkill,
+  InventoryOptions,
+  InventorySortField,
+  McpInventoryOptions,
+  SortOrder,
+} from "./types.js";
 
 /**
  * Return the stable identity used for one skill entry in the interface.
@@ -8,6 +15,43 @@ import type { DiscoveredSkill, InventoryOptions, InventorySortField, SortOrder }
  */
 export function getSkillIdentity(skill: DiscoveredSkill): string {
   return `${skill.application}\u0000${skill.instructionFile}`;
+}
+
+export function getMcpServerIdentity(server: DiscoveredMcpServer): string {
+  return `${server.application}\u0000${server.scope}\u0000${server.projectId ?? "global"}\u0000${server.name}\u0000${server.configurationFile}`;
+}
+
+/** Filter MCP inventory without exposing configuration values or performing I/O. */
+export function createMcpInventoryView(
+  servers: readonly DiscoveredMcpServer[],
+  options: McpInventoryOptions = {},
+): DiscoveredMcpServer[] {
+  const query = options.query?.trim().toLocaleLowerCase() ?? "";
+  const applicationIds = new Set(options.applicationIds ?? []);
+  const scopes = new Set(options.scopes ?? []);
+  const projectIds = new Set(options.projectIds ?? []);
+
+  return servers
+    .filter((server) => {
+      if (applicationIds.size > 0 && !applicationIds.has(server.application)) return false;
+      if (scopes.size > 0 && !scopes.has(server.scope)) return false;
+      if (projectIds.size > 0 && (!server.projectId || !projectIds.has(server.projectId))) {
+        return false;
+      }
+      return (
+        query === "" ||
+        [server.name, server.applicationName, server.projectName ?? "", server.transport]
+          .join("\n")
+          .toLocaleLowerCase()
+          .includes(query)
+      );
+    })
+    .sort(
+      (left, right) =>
+        left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) ||
+        left.application.localeCompare(right.application) ||
+        left.configurationFile.localeCompare(right.configurationFile),
+    );
 }
 
 /**

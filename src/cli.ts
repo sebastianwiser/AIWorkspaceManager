@@ -2,7 +2,8 @@ import process from "node:process";
 import readline from "node:readline/promises";
 import { getApplications, getScanApplications } from "./applications.js";
 import { createInventoryView } from "./inventory.js";
-import { scanApplications } from "./scanner.js";
+import { createMcpInventoryView } from "./inventory.js";
+import { scanLocalInventory } from "./inventory-scan.js";
 import type {
   ApplicationChoice,
   ApplicationDefinition,
@@ -11,6 +12,8 @@ import type {
   CliIo,
   CliOptions,
   DiscoveredSkill,
+  DiscoveredMcpServer,
+  InventoryKind,
   InventorySortField,
   MetadataStatus,
   ScanResult,
@@ -42,7 +45,7 @@ const VALID_SORT_FIELDS = [
 ] as const satisfies readonly InventorySortField[];
 const VALID_SORT_ORDERS = ["asc", "desc"] as const satisfies readonly SortOrder[];
 
-const HELP_TEXT = `SkillManagerOS - discover local AI skills
+const HELP_TEXT = `SkillManagerOS - discover local AI skills and MCP servers
 
 Usage:
   skillmanager
@@ -51,6 +54,7 @@ Usage:
 
 Options:
   --app <name>       Choose chatgpt, claude, or all. If omitted, a menu is shown.
+  --kind <kind>      Show skills (default) or mcp servers.
   --search <text>    Search skill names, folder names, and descriptions.
   --source <list>    Filter by comma-separated source IDs.
   --status <list>    Filter by comma-separated metadata statuses.
@@ -62,6 +66,7 @@ Options:
 
 Examples:
   skillmanager scan --app chatgpt
+  skillmanager scan --kind mcp --app all --details
   skillmanager scan --app chatgpt --details
   skillmanager scan --app all --search document --source personal,plugin
   skillmanager scan --app all --status invalid,missing --sort source
@@ -93,7 +98,7 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
   const applications = (await getScanApplications()).filter((application) =>
     applicationIds.includes(application.id),
   );
-  const scanResult = await scanApplications({ applications });
+  const scanResult = await scanLocalInventory({ applications });
   const result: ScanResult = {
     ...scanResult,
     skills: createInventoryView(scanResult.skills, {
@@ -104,6 +109,10 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
       sortBy: options.sortBy,
       sortOrder: options.sortOrder,
     }),
+    mcpServers: createMcpInventoryView(scanResult.mcpServers, {
+      applicationIds,
+      query: options.search,
+    }),
   };
 
   if (options.json) {
@@ -111,7 +120,13 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     return;
   }
 
-  printHumanReadableResult(result, applications, options, scanResult.skills.length, io);
+  printHumanReadableResult(
+    result,
+    applications,
+    options,
+    options.kind === "mcp" ? scanResult.mcpServers.length : scanResult.skills.length,
+    io,
+  );
 }
 
 export function parseArguments(args: string[]): CliOptions {
@@ -121,6 +136,7 @@ export function parseArguments(args: string[]): CliOptions {
     details: false,
     json: false,
     help: false,
+    kind: "skills",
     search: null,
     sources: [],
     metadataStatuses: [],
@@ -137,6 +153,13 @@ export function parseArguments(args: string[]): CliOptions {
       options.json = true;
     } else if (argument === "--details") {
       options.details = true;
+    } else if (argument === "--kind") {
+      options.kind = parseSingleOption(
+        readOptionValue(normalizedArgs, index, "--kind"),
+        ["skills", "mcp"] as const satisfies readonly InventoryKind[],
+        "--kind",
+      );
+      index += 1;
     } else if (argument === "--app") {
       const value = readOptionValue(normalizedArgs, index, "--app");
       options.application = value.toLowerCase() as ApplicationChoice;
@@ -210,6 +233,11 @@ function printHumanReadableResult(
   io: CliIo,
 ): void {
   const names = applications.map((application) => application.displayName).join(" and ");
+  if (options.kind === "mcp") {
+    printMcpResult(result.mcpServers, result.diagnostics, names, options, totalSkillCount, io);
+    return;
+  }
+
   io.write(`\nScanned local ${names} skill locations.\n`);
 
   if (result.skills.length === 0) {
@@ -251,6 +279,59 @@ function printHumanReadableResult(
   }
 
   io.write("\nRead-only scan complete. No files were changed.\n");
+}
+
+function printMcpResult(
+  servers: DiscoveredMcpServer[],
+  diagnostics: ScanResult["diagnostics"],
+  names: string,
+  options: CliOptions,
+  totalCount: number,
+  io: CliIo,
+): void {
+  io.write(`\nScanned local ${names} MCP configurations.\n`);
+  if (servers.length === 0) {
+    io.write(
+      options.search && totalCount > 0
+        ? "\nNo MCP servers matched the current filters.\n"
+        : "\nNo local MCP servers were found.\n",
+    );
+  } else {
+    io.write(`\nFound ${servers.length} MCP server${servers.length === 1 ? "" : "s"}:\n\n`);
+    for (const application of ["chatgpt", "claude"] as const) {
+      const applicationServers = servers.filter((server) => server.application === application);
+      if (applicationServers.length === 0) continue;
+      io.write(`${application === "chatgpt" ? "ChatGPT" : "Claude"}\n`);
+      for (const server of applicationServers) {
+        io.write(`  ${sanitizeSingleLine(server.name)} [${server.transport}] [${server.status}]\n`);
+        if (options.details) {
+          io.write(`    Scope: ${sanitizeSingleLine(server.projectName ?? "Global")}\n`);
+          io.write(
+            `    Endpoint: ${sanitizeSingleLine(server.command ?? server.url ?? "Not configured")}\n`,
+          );
+          io.write(
+            `    Configuration: ${sanitizeSingleLine(shortenHomePath(server.configurationFile))}\n`,
+          );
+          if (server.environmentVariables.length > 0) {
+            io.write(
+              `    Environment variables: ${sanitizeSingleLine(server.environmentVariables.join(", "))}\n`,
+            );
+          }
+        }
+      }
+      io.write("\n");
+    }
+  }
+
+  const warnings = diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "warning" && diagnostic.code.startsWith("MCP_"),
+  );
+  if (warnings.length > 0) {
+    io.write(`Warnings (${warnings.length}):\n`);
+    for (const warning of warnings) io.write(`  - ${sanitizeSingleLine(warning.message)}\n`);
+    io.write("\n");
+  }
+  io.write("Read-only scan complete. No MCP server was started, tested, or changed.\n");
 }
 
 /** Format skills as a simple list grouped by application. */

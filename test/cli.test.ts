@@ -32,6 +32,7 @@ test("parses a ChatGPT scan command", () => {
     details: false,
     json: false,
     help: false,
+    kind: "skills",
     search: null,
     sources: [],
     metadataStatuses: [],
@@ -46,6 +47,7 @@ test("parses JSON output", () => {
     details: false,
     json: true,
     help: false,
+    kind: "skills",
     search: null,
     sources: [],
     metadataStatuses: [],
@@ -60,6 +62,7 @@ test("parses detailed output", () => {
     details: true,
     json: false,
     help: false,
+    kind: "skills",
     search: null,
     sources: [],
     metadataStatuses: [],
@@ -92,6 +95,7 @@ test("parses inventory filters and sorting", () => {
       details: false,
       json: false,
       help: false,
+      kind: "skills",
       search: "document",
       sources: ["personal", "plugin", "system"],
       metadataStatuses: ["valid", "incomplete"],
@@ -99,6 +103,10 @@ test("parses inventory filters and sorting", () => {
       sortOrder: "desc",
     },
   );
+});
+
+test("parses MCP inventory output", () => {
+  assert.equal(parseArguments(["scan", "--kind", "mcp", "--app", "all"]).kind, "mcp");
 });
 
 test("rejects an unsupported application", () => {

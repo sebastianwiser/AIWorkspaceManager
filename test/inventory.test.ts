@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createInventoryView, getSkillIdentity } from "../src/inventory.js";
-import type { DiscoveredSkill } from "../src/types.js";
+import { createInventoryView, createMcpInventoryView, getSkillIdentity } from "../src/inventory.js";
+import type { DiscoveredMcpServer, DiscoveredSkill } from "../src/types.js";
 
 function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill {
   return {
@@ -22,6 +22,30 @@ function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill 
     projectName: null,
     projectRoot: null,
     modifiedAt: "2026-01-02T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function createMcpServer(overrides: Partial<DiscoveredMcpServer> = {}): DiscoveredMcpServer {
+  return {
+    application: "chatgpt",
+    applicationName: "ChatGPT",
+    name: "docs",
+    scope: "global",
+    projectId: null,
+    projectName: null,
+    projectRoot: null,
+    transport: "http",
+    command: null,
+    arguments: [],
+    url: "https://example.com/mcp",
+    environmentVariables: [],
+    headerNames: [],
+    configurationFile: "/tmp/config.toml",
+    configurationFormat: "toml",
+    safeConfiguration: "",
+    status: "valid",
+    issues: [],
     ...overrides,
   };
 }
@@ -209,5 +233,38 @@ test("does not mutate the scanner's original array", () => {
   assert.deepEqual(
     skills.map((skill) => skill.name),
     originalOrder,
+  );
+});
+
+test("filters MCP servers by application, project, and search text", () => {
+  const servers = [
+    createMcpServer(),
+    createMcpServer({
+      application: "claude",
+      applicationName: "Claude",
+      name: "database",
+      scope: "project",
+      projectId: "claude:project",
+      projectName: "Research",
+      projectRoot: "/tmp/research",
+      transport: "stdio",
+      command: "node",
+      url: null,
+      configurationFile: "/tmp/research/.mcp.json",
+      configurationFormat: "json",
+    }),
+  ];
+
+  assert.deepEqual(
+    createMcpInventoryView(servers, {
+      applicationIds: ["claude"],
+      projectIds: ["claude:project"],
+      query: "research",
+    }).map((server) => server.name),
+    ["database"],
+  );
+  assert.deepEqual(
+    createMcpInventoryView(servers, { scopes: ["global"] }).map((server) => server.name),
+    ["docs"],
   );
 });

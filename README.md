@@ -1,12 +1,13 @@
 # SkillManagerOS
 
-SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills
-installed for ChatGPT and Claude.
+SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills and
+MCP server configurations installed for ChatGPT and Claude.
 
 This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
-parsing**, **MVP 1C: inventory**, and **MVP 1D: change detection**. The program finds folders
-containing `SKILL.md`, reads their declarative YAML frontmatter, and presents the inventory through
-a desktop app or CLI. It does not execute, install, modify, or remove any skill.
+parsing**, **MVP 1C: inventory**, **MVP 1D: change detection**, and **MVP 2A: local MCP discovery**.
+The program finds folders containing `SKILL.md`, reads declarative skill metadata, and inventories
+local MCP configuration without starting a server or exposing configured secret values. It does not
+execute, install, modify, or remove any discovered item.
 
 ## Project goals
 
@@ -14,10 +15,13 @@ The long-term goal is to build a local-first manager for skills, plugins, and Mo
 (MCP) connections used by AI applications. The project starts with read-only local discovery so its
 inventory behavior can be validated before configuration management is added.
 
-The current version answers one question:
+The current version answers two questions:
 
 > Which local skills are installed for ChatGPT and Claude, what do they do, and where did they come
 > from?
+
+> Which MCP servers are configured for those applications and projects, and how are they intended to
+> connect?
 
 ## Current features
 
@@ -48,12 +52,19 @@ The current version answers one question:
 - Report missing or inaccessible scan locations.
 - Avoid symbolic links and large dependency directories.
 - Run completely offline after the one-time dependency installation.
+- Discover global and known-project MCP configuration for Codex, Claude Code, and Claude Desktop.
+- Parse stdio, HTTP, and SSE definitions without starting or contacting a server.
+- Show MCP names, applications, scope, transports, safe commands and URLs, and configuration paths.
+- Redact environment values, header values, URL credentials and query values, and common
+  command-line secret forms before display.
+- Identify invalid and same-scope duplicate MCP server definitions.
+- Search and filter MCP servers by application and project.
+- Inspect a formatted, sanitized configuration excerpt in the desktop interface.
 
 ## What it does not do yet
 
-- Discover MCP configuration files.
 - Discover plugin manifests as inventory items.
-- Test whether an MCP server is running.
+- Test whether an MCP server is running or an endpoint responds.
 - Discover cloud-managed connections.
 - Audit skill security.
 - Install, disable, update, or remove anything.
@@ -118,6 +129,7 @@ npm run scan -- --app all --details
 npm run scan -- --app all --search document
 npm run scan -- --app all --source personal,plugin
 npm run scan -- --app all --status invalid,missing --sort source
+npm run scan -- --kind mcp --app all --details
 ```
 
 Human-readable results are grouped by application:
@@ -156,11 +168,12 @@ Use `--json` when another program needs to consume the results:
 node ./bin/skillmanager.js scan --app all --json
 ```
 
-JSON output contains two arrays:
+JSON output contains three arrays:
 
 ```json
 {
   "skills": [],
+  "mcpServers": [],
   "diagnostics": []
 }
 ```
@@ -168,6 +181,30 @@ JSON output contains two arrays:
 Each skill record includes its application, declared and folder names, description, source
 classification, metadata status, location, and modification time. JSON preserves separate records
 for same-named variants.
+
+MCP records contain only sanitized commands, arguments, URLs, and configuration excerpts. Literal
+environment and header values are never included.
+
+## MCP inventory
+
+Use the **Skills | MCP Servers** switch in the desktop app, or `--kind mcp` in the CLI. MCP servers
+can be searched and filtered by application and project. The detail view shows the inferred
+transport, safe endpoint summary, declared environment-variable and header names, configuration
+location, validation notes, and a sanitized source excerpt.
+
+The read-only MCP scan checks these local configuration sources when present:
+
+| Application    | Scope   | Location                                                                   |
+| -------------- | ------- | -------------------------------------------------------------------------- |
+| Codex          | Global  | `~/.codex/config.toml`                                                     |
+| Codex          | Project | `<known project>/.codex/config.toml`                                       |
+| Claude Code    | Global  | `~/.claude.json`                                                           |
+| Claude Code    | Project | `<known project>/.mcp.json` and project entries in `~/.claude.json`        |
+| Claude Desktop | Global  | `~/Library/Application Support/Claude/claude_desktop_config.json` on macOS |
+
+Missing configuration files are normal and remain silent. Malformed files, invalid server
+definitions, and duplicate names in the same application and scope produce warnings. The scan never
+starts a command, opens a connection, checks reachability, or modifies configuration.
 
 ## Inventory filters
 
@@ -295,6 +332,7 @@ The scanner follows this process:
 Discovered files must be treated as untrusted input. This version follows these rules:
 
 - Never execute discovered scripts or commands.
+- Never start or contact a discovered MCP server.
 - Never modify discovered files.
 - Never parse `SKILL.md` as executable code.
 - Allow the desktop content viewer to read only files returned by the latest scan.
@@ -310,6 +348,8 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Stop recursively scanning below a fixed maximum depth.
 - Continue when an optional location is missing or unreadable.
 - Do not send scan results over the network.
+- Redact literal environment values, header values, URL credentials and query values, and common
+  command-line secret forms before MCP configuration leaves the trusted scan layer.
 - Keep filesystem access in Electron's main process.
 - Expose only narrow inventory, content-preview, and baseline-reset functions to the desktop
   interface.
@@ -329,8 +369,10 @@ SkillManagerOS/
 │   │   ├── main.ts           Secure Electron main process
 │   │   ├── preload.cts       Narrow read-only desktop bridge
 │   │   └── renderer/         React inventory interface and styles
+│   ├── inventory-scan.ts     Shared skill and MCP scan orchestration
 │   ├── inventory.ts          Reusable searching, filtering, and sorting
 │   ├── main.ts               Development command-line entry point
+│   ├── mcp.ts                Secret-safe MCP configuration discovery
 │   ├── metadata.ts           Bounded YAML frontmatter parsing
 │   ├── projects.ts           Safe project registry and skill-folder discovery
 │   ├── scanner.ts            Read-only filesystem discovery
@@ -339,6 +381,7 @@ SkillManagerOS/
 │   ├── cli.test.ts           Command argument tests
 │   ├── changes.test.ts       Snapshot and change-detection tests
 │   ├── inventory.test.ts     Inventory filtering and sorting tests
+│   ├── mcp.test.ts           MCP parsing, validation, duplicate, and redaction tests
 │   ├── metadata.test.ts      Metadata parsing and edge-case tests
 │   ├── projects.test.ts      Project discovery and boundary tests
 │   └── scanner.test.ts       Scanner behavior and safety tests
@@ -356,6 +399,8 @@ Keeping these responsibilities separate makes the code easier to learn:
 - `applications.ts` answers **where should we look?**
 - `changes.ts` answers **what changed since the previous desktop scan?**
 - `inventory.ts` answers **which discovered skills should this view show?**
+- `inventory-scan.ts` combines the read-only skill and MCP discovery results.
+- `mcp.ts` answers **which local MCP servers are configured, without exposing secret values?**
 - `metadata.ts` answers **what safe metadata does the skill declare?**
 - `projects.ts` answers **which known projects contain local skill folders?**
 - `scanner.ts` answers **what skill markers are present?**
@@ -389,8 +434,8 @@ Apply the standard formatting after editing:
 npm run format
 ```
 
-The tests create temporary fake skill directories. They do not inspect or modify your real ChatGPT
-or Claude files.
+The tests create temporary fake skill directories and MCP configurations. They do not inspect or
+modify your real ChatGPT or Claude files.
 
 ## Adding another default location
 
@@ -413,7 +458,10 @@ The shared scanner will include it automatically.
 3. **MVP 1C — Inventory:** complete with reusable filtering, CLI controls, and a desktop interface.
 4. **MVP 1D — Change detection:** complete with local baselines and added, modified, moved, and
    removed skill views.
-5. **Later pillars:** local MCP discovery, plugin inspection, auditing, and safe management.
+5. **MVP 2A — Local MCP discovery:** complete with secret-safe parsing, filtering, diagnostics, and
+   desktop/CLI inventory views.
+6. **Later pillars:** plugin inspection, workspace composition, auditing, portability, and safe
+   management.
 
 ## Contributing principles
 

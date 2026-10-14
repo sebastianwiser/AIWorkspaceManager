@@ -40,7 +40,7 @@ const IGNORED_DIRECTORY_NAMES = new Set([
 export async function scanApplications({
   applications,
   maxDepth = DEFAULT_MAX_DEPTH,
-}: ScanApplicationsOptions): Promise<ScanResult> {
+}: ScanApplicationsOptions): Promise<Omit<ScanResult, "mcpServers">> {
   const skills: DiscoveredSkill[] = [];
   const diagnostics: ScanDiagnostic[] = [];
   const seenSkills = new Set<string>();

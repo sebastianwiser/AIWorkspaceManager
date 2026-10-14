@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createInventoryView, getSkillIdentity } from "../../inventory.js";
+import {
+  createInventoryView,
+  createMcpInventoryView,
+  getMcpServerIdentity,
+  getSkillIdentity,
+} from "../../inventory.js";
 import { getRenderableMarkdown } from "../../markdown.js";
 import type {
   ApplicationChoice,
   DesktopScanResult,
+  DiscoveredMcpServer,
   DiscoveredSkill,
+  InventoryKind,
   InventorySortField,
+  McpStatus,
   MetadataStatus,
   SkillChange,
   SkillChangeType,
@@ -65,6 +73,7 @@ export function App() {
   const [isResettingBaseline, setIsResettingBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InventoryMode>("inventory");
+  const [inventoryKind, setInventoryKind] = useState<InventoryKind>("skills");
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [source, setSource] = useState<SourceFilter>("all");
@@ -215,6 +224,25 @@ export function App() {
           </div>
         </div>
 
+        <nav className="inventory-kind-switch" aria-label="Inventory type">
+          <button
+            type="button"
+            className={inventoryKind === "skills" ? "active" : ""}
+            aria-current={inventoryKind === "skills" ? "page" : undefined}
+            onClick={() => setInventoryKind("skills")}
+          >
+            Skills
+          </button>
+          <button
+            type="button"
+            className={inventoryKind === "mcp" ? "active" : ""}
+            aria-current={inventoryKind === "mcp" ? "page" : undefined}
+            onClick={() => setInventoryKind("mcp")}
+          >
+            MCP Servers
+          </button>
+        </nav>
+
         <div className="titlebar-actions">
           <div className="read-only-badge">
             <ShieldIcon />
@@ -233,238 +261,589 @@ export function App() {
       </header>
 
       <main>
-        <section className="intro-row" aria-labelledby="inventory-heading">
-          <div>
-            <p className="section-kicker">SKILL LIBRARY</p>
-            <h2 id="inventory-heading">Everything installed, in one place.</h2>
-            <p>Browse the local skills available to ChatGPT and Claude without changing a file.</p>
-          </div>
-          {scanResult && (
-            <p className="scan-time">
-              Last scanned{" "}
-              <time dateTime={scanResult.scannedAt}>{formatTime(scanResult.scannedAt)}</time>
-            </p>
-          )}
-        </section>
-
-        <section className="stats-grid" aria-label="Inventory summary">
-          <StatCard label="Total definitions" value={allSkills.length} tone="ink" />
-          <StatCard label="ChatGPT" value={chatGptCount} tone="green" />
-          <StatCard label="Claude" value={claudeCount} tone="orange" />
-          <StatCard label="Needs attention" value={attentionCount} tone="yellow" />
-        </section>
-
-        {scanResult && (
-          <ChangeSummary
-            changes={scanResult.changes.items}
-            baselineCreated={scanResult.changes.baselineCreated}
-            baselineScannedAt={scanResult.changes.baselineScannedAt}
-            onViewChanges={() => setMode("changes")}
-            onReset={() => void resetBaseline()}
-            isResetting={isResettingBaseline}
+        {inventoryKind === "mcp" ? (
+          <McpInventoryPanel
+            scanResult={scanResult}
+            isScanning={isScanning}
+            error={error}
+            onRetry={refreshInventory}
           />
-        )}
+        ) : (
+          <>
+            <section className="intro-row" aria-labelledby="inventory-heading">
+              <div>
+                <p className="section-kicker">SKILL LIBRARY</p>
+                <h2 id="inventory-heading">Everything installed, in one place.</h2>
+                <p>
+                  Browse the local skills available to ChatGPT and Claude without changing a file.
+                </p>
+              </div>
+              {scanResult && (
+                <p className="scan-time">
+                  Last scanned{" "}
+                  <time dateTime={scanResult.scannedAt}>{formatTime(scanResult.scannedAt)}</time>
+                </p>
+              )}
+            </section>
 
-        {error && (
-          <div className="message error-message" role="alert">
-            <AlertIcon />
-            <div>
-              <strong>The local inventory could not be scanned.</strong>
-              <span>{error}</span>
-            </div>
-            <button type="button" onClick={refreshInventory}>
-              Try again
-            </button>
-          </div>
-        )}
+            <section className="stats-grid" aria-label="Inventory summary">
+              <StatCard label="Total definitions" value={allSkills.length} tone="ink" />
+              <StatCard label="ChatGPT" value={chatGptCount} tone="green" />
+              <StatCard label="Claude" value={claudeCount} tone="orange" />
+              <StatCard label="Needs attention" value={attentionCount} tone="yellow" />
+            </section>
 
-        {!error && warningCount > 0 && (
-          <div className="message warning-message" role="status">
-            <AlertIcon />
-            <span>
-              {warningCount} scan warning{warningCount === 1 ? "" : "s"} need attention.
-            </span>
-          </div>
-        )}
-
-        <section className="inventory-card">
-          <div className="inventory-tabs" role="tablist" aria-label="Inventory view">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "inventory"}
-              className={mode === "inventory" ? "active" : ""}
-              onClick={() => setMode("inventory")}
-            >
-              Inventory
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "changes"}
-              className={mode === "changes" ? "active" : ""}
-              onClick={() => setMode("changes")}
-            >
-              Changes
-              {allChanges.length > 0 && <span>{allChanges.length}</span>}
-            </button>
-          </div>
-          <div className="controls">
-            <label className="search-control">
-              <span className="visually-hidden">Search skills</span>
-              <SearchIcon />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search skills and descriptions"
+            {scanResult && (
+              <ChangeSummary
+                changes={scanResult.changes.items}
+                baselineCreated={scanResult.changes.baselineCreated}
+                baselineScannedAt={scanResult.changes.baselineScannedAt}
+                onViewChanges={() => setMode("changes")}
+                onReset={() => void resetBaseline()}
+                isResetting={isResettingBaseline}
               />
-            </label>
-
-            <SelectControl
-              label="Application"
-              value={application}
-              onChange={(value) => setApplication(value as ApplicationChoice)}
-            >
-              <option value="all">All applications</option>
-              <option value="chatgpt">ChatGPT</option>
-              <option value="claude">Claude</option>
-            </SelectControl>
-
-            <SelectControl
-              label="Project"
-              value={project}
-              onChange={(value) => setProject(value as ProjectFilter)}
-            >
-              <option value="all">All locations</option>
-              <option value="global">Global only</option>
-              {projectOptions.map((option) => (
-                <option key={option.id} value={`project:${option.id}`}>
-                  {option.name}
-                </option>
-              ))}
-            </SelectControl>
-
-            <SelectControl
-              label="Source"
-              value={source}
-              onChange={(value) => setSource(value as SourceFilter)}
-            >
-              {sourceOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </SelectControl>
-
-            {mode === "inventory" ? (
-              <SelectControl
-                label="Metadata"
-                value={status}
-                onChange={(value) => setStatus(value as StatusFilter)}
-              >
-                {statusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectControl>
-            ) : (
-              <SelectControl
-                label="Change"
-                value={changeType}
-                onChange={(value) => setChangeType(value as ChangeFilter)}
-              >
-                {changeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </SelectControl>
             )}
 
-            <SelectControl
-              label="Sort by"
-              value={sortBy}
-              onChange={(value) => setSortBy(value as InventorySortField)}
-            >
-              {sortOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </SelectControl>
-
-            <button
-              className="order-button"
-              type="button"
-              onClick={() => setSortOrder((current) => (current === "asc" ? "desc" : "asc"))}
-              aria-label={`Change to ${sortOrder === "asc" ? "descending" : "ascending"} order`}
-            >
-              {sortOrder === "asc" ? "A → Z" : "Z → A"}
-            </button>
-          </div>
-
-          <div className="inventory-meta">
-            <span>
-              <strong>{inventory.length}</strong> of{" "}
-              {mode === "inventory" ? allSkills.length : allChanges.length}{" "}
-              {mode === "inventory" ? "definitions" : "changes"}
-            </span>
-            {missingLocationCount > 0 && (
-              <span>{missingLocationCount} optional locations not present</span>
+            {error && (
+              <div className="message error-message" role="alert">
+                <AlertIcon />
+                <div>
+                  <strong>The local inventory could not be scanned.</strong>
+                  <span>{error}</span>
+                </div>
+                <button type="button" onClick={refreshInventory}>
+                  Try again
+                </button>
+              </div>
             )}
-          </div>
 
-          <div className="inventory-layout">
-            <div className="skill-list" aria-label="Skills">
-              {isScanning && !scanResult ? (
-                <LoadingList />
-              ) : inventory.length > 0 ? (
-                inventory.map((skill) => (
-                  <SkillRow
-                    key={getSkillIdentity(skill)}
-                    skill={skill}
-                    selected={getSkillIdentity(skill) === selectedSkillId}
-                    variantCount={variantCounts.get(variantKey(skill)) ?? 1}
-                    change={
-                      mode === "changes"
-                        ? (allChanges.find(
-                            (item) => getSkillIdentity(item.skill) === getSkillIdentity(skill),
-                          ) ?? null)
-                        : null
-                    }
-                    onSelect={() => setSelectedSkillId(getSkillIdentity(skill))}
+            {!error && warningCount > 0 && (
+              <div className="message warning-message" role="status">
+                <AlertIcon />
+                <span>
+                  {warningCount} scan warning{warningCount === 1 ? "" : "s"} need attention.
+                </span>
+              </div>
+            )}
+
+            <section className="inventory-card">
+              <div className="inventory-tabs" role="tablist" aria-label="Inventory view">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "inventory"}
+                  className={mode === "inventory" ? "active" : ""}
+                  onClick={() => setMode("inventory")}
+                >
+                  Inventory
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === "changes"}
+                  className={mode === "changes" ? "active" : ""}
+                  onClick={() => setMode("changes")}
+                >
+                  Changes
+                  {allChanges.length > 0 && <span>{allChanges.length}</span>}
+                </button>
+              </div>
+              <div className="controls">
+                <label className="search-control">
+                  <span className="visually-hidden">Search skills</span>
+                  <SearchIcon />
+                  <input
+                    type="search"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search skills and descriptions"
                   />
-                ))
-              ) : (
-                <EmptyInventory
-                  mode={mode}
-                  hasActiveFilters={hasActiveFilters}
-                  onClear={clearFilters}
-                />
-              )}
-            </div>
+                </label>
 
-            <aside className="detail-panel" aria-label="Selected skill details">
-              {selectedSkill ? (
-                <SkillDetails
-                  key={`${getSkillIdentity(selectedSkill)}:${selectedChange?.type ?? "inventory"}`}
-                  skill={selectedSkill}
-                  change={selectedChange}
-                />
-              ) : (
-                <EmptyDetails />
-              )}
-            </aside>
-          </div>
-        </section>
+                <SelectControl
+                  label="Application"
+                  value={application}
+                  onChange={(value) => setApplication(value as ApplicationChoice)}
+                >
+                  <option value="all">All applications</option>
+                  <option value="chatgpt">ChatGPT</option>
+                  <option value="claude">Claude</option>
+                </SelectControl>
+
+                <SelectControl
+                  label="Project"
+                  value={project}
+                  onChange={(value) => setProject(value as ProjectFilter)}
+                >
+                  <option value="all">All locations</option>
+                  <option value="global">Global only</option>
+                  {projectOptions.map((option) => (
+                    <option key={option.id} value={`project:${option.id}`}>
+                      {option.name}
+                    </option>
+                  ))}
+                </SelectControl>
+
+                <SelectControl
+                  label="Source"
+                  value={source}
+                  onChange={(value) => setSource(value as SourceFilter)}
+                >
+                  {sourceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectControl>
+
+                {mode === "inventory" ? (
+                  <SelectControl
+                    label="Metadata"
+                    value={status}
+                    onChange={(value) => setStatus(value as StatusFilter)}
+                  >
+                    {statusOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </SelectControl>
+                ) : (
+                  <SelectControl
+                    label="Change"
+                    value={changeType}
+                    onChange={(value) => setChangeType(value as ChangeFilter)}
+                  >
+                    {changeOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </SelectControl>
+                )}
+
+                <SelectControl
+                  label="Sort by"
+                  value={sortBy}
+                  onChange={(value) => setSortBy(value as InventorySortField)}
+                >
+                  {sortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectControl>
+
+                <button
+                  className="order-button"
+                  type="button"
+                  onClick={() => setSortOrder((current) => (current === "asc" ? "desc" : "asc"))}
+                  aria-label={`Change to ${sortOrder === "asc" ? "descending" : "ascending"} order`}
+                >
+                  {sortOrder === "asc" ? "A → Z" : "Z → A"}
+                </button>
+              </div>
+
+              <div className="inventory-meta">
+                <span>
+                  <strong>{inventory.length}</strong> of{" "}
+                  {mode === "inventory" ? allSkills.length : allChanges.length}{" "}
+                  {mode === "inventory" ? "definitions" : "changes"}
+                </span>
+                {missingLocationCount > 0 && (
+                  <span>{missingLocationCount} optional locations not present</span>
+                )}
+              </div>
+
+              <div className="inventory-layout">
+                <div className="skill-list" aria-label="Skills">
+                  {isScanning && !scanResult ? (
+                    <LoadingList />
+                  ) : inventory.length > 0 ? (
+                    inventory.map((skill) => (
+                      <SkillRow
+                        key={getSkillIdentity(skill)}
+                        skill={skill}
+                        selected={getSkillIdentity(skill) === selectedSkillId}
+                        variantCount={variantCounts.get(variantKey(skill)) ?? 1}
+                        change={
+                          mode === "changes"
+                            ? (allChanges.find(
+                                (item) => getSkillIdentity(item.skill) === getSkillIdentity(skill),
+                              ) ?? null)
+                            : null
+                        }
+                        onSelect={() => setSelectedSkillId(getSkillIdentity(skill))}
+                      />
+                    ))
+                  ) : (
+                    <EmptyInventory
+                      mode={mode}
+                      hasActiveFilters={hasActiveFilters}
+                      onClear={clearFilters}
+                    />
+                  )}
+                </div>
+
+                <aside className="detail-panel" aria-label="Selected skill details">
+                  {selectedSkill ? (
+                    <SkillDetails
+                      key={`${getSkillIdentity(selectedSkill)}:${selectedChange?.type ?? "inventory"}`}
+                      skill={selectedSkill}
+                      change={selectedChange}
+                    />
+                  ) : (
+                    <EmptyDetails />
+                  )}
+                </aside>
+              </div>
+            </section>
+          </>
+        )}
       </main>
 
       <footer>
         <ShieldIcon />
-        Local-only discovery · No skill files are executed or changed
+        Local-only discovery · No skills or MCP servers are executed or changed
       </footer>
+    </div>
+  );
+}
+
+function McpInventoryPanel({
+  scanResult,
+  isScanning,
+  error,
+  onRetry,
+}: {
+  scanResult: DesktopScanResult | null;
+  isScanning: boolean;
+  error: string | null;
+  onRetry: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [application, setApplication] = useState<ApplicationChoice>("all");
+  const [project, setProject] = useState<ProjectFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const servers = scanResult?.mcpServers ?? [];
+  const projects = useMemo(
+    () => getMcpProjectOptions(servers, application),
+    [servers, application],
+  );
+  const filtered = useMemo(
+    () =>
+      createMcpInventoryView(servers, {
+        applicationIds: application === "all" ? undefined : [application],
+        query,
+        scopes: project === "global" ? ["global"] : undefined,
+        projectIds: project.startsWith("project:") ? [project.slice("project:".length)] : undefined,
+      }),
+    [application, project, query, servers],
+  );
+
+  useEffect(() => {
+    if (filtered.length === 0) {
+      setSelectedId(null);
+    } else if (!filtered.some((server) => getMcpServerIdentity(server) === selectedId)) {
+      setSelectedId(getMcpServerIdentity(filtered[0]));
+    }
+  }, [filtered, selectedId]);
+
+  useEffect(() => {
+    if (
+      project.startsWith("project:") &&
+      !projects.some((option) => `project:${option.id}` === project)
+    ) {
+      setProject("all");
+    }
+  }, [project, projects]);
+
+  const selected =
+    filtered.find((server) => getMcpServerIdentity(server) === selectedId) ?? filtered[0] ?? null;
+  const invalidCount = servers.filter((server) => server.status !== "valid").length;
+  const warningCount =
+    scanResult?.diagnostics.filter(
+      (diagnostic) => diagnostic.severity === "warning" && diagnostic.code.startsWith("MCP_"),
+    ).length ?? 0;
+  const hasFilters = query !== "" || application !== "all" || project !== "all";
+
+  return (
+    <>
+      <section className="intro-row" aria-labelledby="mcp-heading">
+        <div>
+          <p className="section-kicker">MCP INVENTORY</p>
+          <h2 id="mcp-heading">Every local connection, without connecting.</h2>
+          <p>
+            Inspect the MCP servers configured for ChatGPT and Claude. Secret values stay hidden.
+          </p>
+        </div>
+        {scanResult && (
+          <p className="scan-time">
+            Last scanned{" "}
+            <time dateTime={scanResult.scannedAt}>{formatTime(scanResult.scannedAt)}</time>
+          </p>
+        )}
+      </section>
+
+      <section className="stats-grid" aria-label="MCP inventory summary">
+        <StatCard label="Configured servers" value={servers.length} tone="ink" />
+        <StatCard
+          label="ChatGPT"
+          value={servers.filter((server) => server.application === "chatgpt").length}
+          tone="green"
+        />
+        <StatCard
+          label="Claude"
+          value={servers.filter((server) => server.application === "claude").length}
+          tone="orange"
+        />
+        <StatCard label="Needs attention" value={invalidCount} tone="yellow" />
+      </section>
+
+      {error && (
+        <div className="message error-message" role="alert">
+          <AlertIcon />
+          <div>
+            <strong>The local inventory could not be scanned.</strong>
+            <span>{error}</span>
+          </div>
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
+      )}
+      {!error && warningCount > 0 && (
+        <div className="message warning-message" role="status">
+          <AlertIcon />
+          <span>
+            {warningCount} MCP configuration warning{warningCount === 1 ? "" : "s"} need attention.
+          </span>
+        </div>
+      )}
+
+      <section className="inventory-card">
+        <div className="controls mcp-controls">
+          <label className="search-control">
+            <span className="visually-hidden">Search MCP servers</span>
+            <SearchIcon />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search MCP servers"
+            />
+          </label>
+          <SelectControl
+            label="Application"
+            value={application}
+            onChange={(value) => setApplication(value as ApplicationChoice)}
+          >
+            <option value="all">All applications</option>
+            <option value="chatgpt">ChatGPT</option>
+            <option value="claude">Claude</option>
+          </SelectControl>
+          <SelectControl
+            label="Project"
+            value={project}
+            onChange={(value) => setProject(value as ProjectFilter)}
+          >
+            <option value="all">All locations</option>
+            <option value="global">Global only</option>
+            {projects.map((option) => (
+              <option key={option.id} value={`project:${option.id}`}>
+                {option.name}
+              </option>
+            ))}
+          </SelectControl>
+          {hasFilters && (
+            <button
+              className="order-button"
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setApplication("all");
+                setProject("all");
+              }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        <div className="inventory-meta">
+          <span>
+            <strong>{filtered.length}</strong> of {servers.length} servers
+          </span>
+          <span>Configuration values are redacted locally</span>
+        </div>
+        <div className="inventory-layout">
+          <div className="skill-list" aria-label="MCP servers">
+            {isScanning && !scanResult ? (
+              <LoadingList />
+            ) : filtered.length > 0 ? (
+              filtered.map((server) => (
+                <McpServerRow
+                  key={getMcpServerIdentity(server)}
+                  server={server}
+                  selected={getMcpServerIdentity(server) === selectedId}
+                  onSelect={() => setSelectedId(getMcpServerIdentity(server))}
+                />
+              ))
+            ) : (
+              <div className="empty-state">
+                <h3>{hasFilters ? "No servers match these filters" : "No MCP servers found"}</h3>
+                <p>
+                  {hasFilters
+                    ? "Clear the filters to see the complete MCP inventory."
+                    : "Add an MCP configuration to ChatGPT or Claude, then rescan."}
+                </p>
+              </div>
+            )}
+          </div>
+          <aside className="detail-panel" aria-label="Selected MCP server details">
+            {selected ? <McpServerDetails server={selected} /> : <EmptyMcpDetails />}
+          </aside>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function McpServerRow({
+  server,
+  selected,
+  onSelect,
+}: {
+  server: DiscoveredMcpServer;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button className={`skill-row${selected ? " selected" : ""}`} type="button" onClick={onSelect}>
+      <span className={`app-monogram app-${server.application}`}>
+        {server.application === "chatgpt" ? "G" : "C"}
+      </span>
+      <span className="skill-row-copy">
+        <span className="skill-name-line">
+          <strong>{server.name}</strong>
+        </span>
+        <span>{server.command ?? server.url ?? "No usable endpoint configured"}</span>
+        <span className="row-meta">
+          {server.applicationName} · {server.projectName ?? "Global"} ·{" "}
+          {server.transport.toUpperCase()}
+        </span>
+      </span>
+      <span className="row-status">
+        <McpStatusPill status={server.status} />
+      </span>
+    </button>
+  );
+}
+
+function McpServerDetails({ server }: { server: DiscoveredMcpServer }) {
+  return (
+    <div className="detail-content">
+      <div className="detail-heading">
+        <span className={`app-monogram app-${server.application}`}>
+          {server.application === "chatgpt" ? "G" : "C"}
+        </span>
+        <div>
+          <p>{server.applicationName}</p>
+          <h3>{server.name}</h3>
+        </div>
+      </div>
+      <dl className="detail-list">
+        <div>
+          <dt>Status</dt>
+          <dd>
+            <McpStatusPill status={server.status} />
+          </dd>
+        </div>
+        <div>
+          <dt>Availability</dt>
+          <dd>{server.projectName ? `Project: ${server.projectName}` : "Global"}</dd>
+        </div>
+        <div>
+          <dt>Transport</dt>
+          <dd>{server.transport.toUpperCase()}</dd>
+        </div>
+        {server.command && (
+          <div>
+            <dt>Command</dt>
+            <dd>
+              <code>{server.command}</code>
+            </dd>
+          </div>
+        )}
+        {server.arguments.length > 0 && (
+          <div>
+            <dt>Arguments</dt>
+            <dd>
+              <code>{server.arguments.join(" ")}</code>
+            </dd>
+          </div>
+        )}
+        {server.url && (
+          <div>
+            <dt>URL</dt>
+            <dd>
+              <code>{server.url}</code>
+            </dd>
+          </div>
+        )}
+        <div>
+          <dt>Environment</dt>
+          <dd>
+            {server.environmentVariables.length > 0
+              ? server.environmentVariables.join(", ")
+              : "None declared"}
+          </dd>
+        </div>
+        <div>
+          <dt>Headers</dt>
+          <dd>{server.headerNames.length > 0 ? server.headerNames.join(", ") : "None declared"}</dd>
+        </div>
+      </dl>
+      {server.issues.length > 0 && (
+        <div className="issues-box">
+          <strong>Configuration notes</strong>
+          <ul>
+            {server.issues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="location-block">
+        <span>
+          <FolderIcon /> Configuration file
+        </span>
+        <code>{shortenPath(server.configurationFile)}</code>
+      </div>
+      <section
+        className="skill-contents mcp-configuration"
+        aria-label="Sanitized MCP configuration"
+      >
+        <div className="content-heading">
+          <div>
+            <strong>Sanitized source</strong>
+            <span>Secret values are replaced before display</span>
+          </div>
+        </div>
+        <pre className="skill-content-code">{server.safeConfiguration}</pre>
+      </section>
+    </div>
+  );
+}
+
+function McpStatusPill({ status }: { status: McpStatus }) {
+  return <span className={`status-pill status-${status}`}>{capitalize(status)}</span>;
+}
+
+function EmptyMcpDetails() {
+  return (
+    <div className="empty-details">
+      <h3>Select an MCP server</h3>
+      <p>Its scope, transport, endpoint, and sanitized configuration will appear here.</p>
     </div>
   );
 }
@@ -966,6 +1345,40 @@ function getProjectOptions(
         application === "all" && (duplicateNames.get(project.name) ?? 0) > 1
           ? `${project.name} — ${project.applicationName}`
           : project.name,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+}
+
+function getMcpProjectOptions(
+  servers: readonly DiscoveredMcpServer[],
+  application: ApplicationChoice,
+): Array<{ id: string; name: string }> {
+  const projects = new Map<string, { applicationName: string; name: string }>();
+  for (const server of servers) {
+    if (
+      server.projectId &&
+      server.projectName &&
+      (application === "all" || server.application === application)
+    ) {
+      projects.set(server.projectId, {
+        applicationName: server.applicationName,
+        name: server.projectName,
+      });
+    }
+  }
+
+  const duplicateNames = new Map<string, number>();
+  for (const item of projects.values()) {
+    duplicateNames.set(item.name, (duplicateNames.get(item.name) ?? 0) + 1);
+  }
+
+  return [...projects.entries()]
+    .map(([id, item]) => ({
+      id,
+      name:
+        application === "all" && (duplicateNames.get(item.name) ?? 0) > 1
+          ? `${item.name} — ${item.applicationName}`
+          : item.name,
     }))
     .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
 }

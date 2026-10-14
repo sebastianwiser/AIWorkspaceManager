@@ -1,7 +1,7 @@
 {
   "name": "skillmanager-os",
-  "version": "0.3.0",
-  "description": "A read-only desktop app and CLI for discovering local AI skills.",
+  "version": "0.4.0",
+  "description": "A read-only desktop app and CLI for discovering local AI skills and MCP servers.",
   "type": "module",
   "main": "./dist/desktop/main.js",
   "bin": {
@@ -36,6 +36,7 @@
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "smol-toml": "^1.9.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

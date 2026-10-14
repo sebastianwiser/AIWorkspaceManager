@@ -15,14 +15,14 @@ const IGNORED_PROJECT_FOLDERS = new Set([
   ".archive",
 ]);
 
-interface ProjectRoot {
+export interface KnownProject {
   application: ApplicationId;
   id: string;
   name: string;
   path: string;
 }
 
-interface ProjectDiscoveryOptions {
+export interface ProjectDiscoveryOptions {
   codexStateFile?: string;
   claudeStateFile?: string;
   claudeSpacesFiles?: readonly string[];
@@ -40,17 +40,7 @@ interface LocatedProjectSkills {
 export async function discoverProjectSkillLocations(
   options: ProjectDiscoveryOptions = {},
 ): Promise<LocatedProjectSkills[]> {
-  const home = os.homedir();
-  const claudeSpacesFiles =
-    options.claudeSpacesFiles ??
-    (await findClaudeSpacesFiles(
-      path.join(home, "Library", "Application Support", "Claude", "local-agent-mode-sessions"),
-    ));
-  const roots = await readProjectRoots(
-    options.codexStateFile ?? path.join(home, ".codex", ".codex-global-state.json"),
-    options.claudeStateFile ?? path.join(home, ".claude.json"),
-    claudeSpacesFiles,
-  );
+  const roots = await discoverKnownProjects(options);
   const locations = new Map<string, LocatedProjectSkills>();
 
   for (const root of roots) {
@@ -62,12 +52,30 @@ export async function discoverProjectSkillLocations(
   );
 }
 
+/** Read the bounded project registries already maintained by Codex and Claude. */
+export async function discoverKnownProjects(
+  options: ProjectDiscoveryOptions = {},
+): Promise<KnownProject[]> {
+  const home = os.homedir();
+  const claudeSpacesFiles =
+    options.claudeSpacesFiles ??
+    (await findClaudeSpacesFiles(
+      path.join(home, "Library", "Application Support", "Claude", "local-agent-mode-sessions"),
+    ));
+
+  return readProjectRoots(
+    options.codexStateFile ?? path.join(home, ".codex", ".codex-global-state.json"),
+    options.claudeStateFile ?? path.join(home, ".claude.json"),
+    claudeSpacesFiles,
+  );
+}
+
 async function readProjectRoots(
   codexStateFile: string,
   claudeStateFile: string,
   claudeSpacesFiles: readonly string[],
-): Promise<ProjectRoot[]> {
-  const roots = new Map<string, ProjectRoot>();
+): Promise<KnownProject[]> {
+  const roots = new Map<string, KnownProject>();
   const codexState = await readJsonObject(codexStateFile);
   const localProjects = asObject(codexState?.["local-projects"]);
 
@@ -117,7 +125,7 @@ async function readProjectRoots(
 }
 
 function addProjectRoot(
-  roots: Map<string, ProjectRoot>,
+  roots: Map<string, KnownProject>,
   application: ApplicationId,
   rootPath: string,
   projectId: string,
@@ -138,7 +146,7 @@ function addProjectRoot(
 }
 
 async function findSkillFolders(
-  registeredRoot: ProjectRoot,
+  registeredRoot: KnownProject,
   currentPath: string,
   depth: number,
   locations: Map<string, LocatedProjectSkills>,

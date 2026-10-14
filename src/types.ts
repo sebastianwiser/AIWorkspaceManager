@@ -6,6 +6,10 @@ export type SkillSourceId =
   "personal" | "system" | "plugin" | "plugin-cache" | "claude-desktop-plugin" | "project";
 
 export type SkillScope = "global" | "project";
+export type InventoryKind = "skills" | "mcp";
+export type McpTransport = "stdio" | "http" | "sse" | "unknown";
+export type McpConfigurationFormat = "json" | "toml";
+export type McpStatus = "valid" | "invalid" | "duplicate";
 
 export type MetadataStatus = "valid" | "incomplete" | "missing" | "invalid" | "unreadable";
 
@@ -18,7 +22,10 @@ export type DiagnosticCode =
   | "READ_FAILED"
   | "SYMLINK_ROOT_SKIPPED"
   | "NOT_A_DIRECTORY"
-  | "MAX_DEPTH_REACHED";
+  | "MAX_DEPTH_REACHED"
+  | "MCP_CONFIG_INVALID"
+  | "MCP_SERVER_INVALID"
+  | "MCP_SERVER_DUPLICATE";
 
 export interface ScanLocationDefinition {
   label: string;
@@ -76,7 +83,29 @@ export interface ScanDiagnostic {
 
 export interface ScanResult {
   skills: DiscoveredSkill[];
+  mcpServers: DiscoveredMcpServer[];
   diagnostics: ScanDiagnostic[];
+}
+
+export interface DiscoveredMcpServer {
+  application: ApplicationId;
+  applicationName: string;
+  name: string;
+  scope: SkillScope;
+  projectId: string | null;
+  projectName: string | null;
+  projectRoot: string | null;
+  transport: McpTransport;
+  command: string | null;
+  arguments: string[];
+  url: string | null;
+  environmentVariables: string[];
+  headerNames: string[];
+  configurationFile: string;
+  configurationFormat: McpConfigurationFormat;
+  safeConfiguration: string;
+  status: McpStatus;
+  issues: string[];
 }
 
 export interface DesktopScanResult extends ScanResult {
@@ -123,11 +152,19 @@ export interface CliOptions {
   details: boolean;
   json: boolean;
   help: boolean;
+  kind: InventoryKind;
   search: string | null;
   sources: SkillSourceId[];
   metadataStatuses: MetadataStatus[];
   sortBy: InventorySortField;
   sortOrder: SortOrder;
+}
+
+export interface McpInventoryOptions {
+  applicationIds?: readonly ApplicationId[];
+  query?: string | null;
+  scopes?: readonly SkillScope[];
+  projectIds?: readonly string[];
 }
 
 /** Options shared by the CLI today and the future desktop interface. */

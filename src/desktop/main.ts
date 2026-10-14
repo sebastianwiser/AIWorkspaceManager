@@ -9,7 +9,7 @@ import {
   writeInventorySnapshot,
   type InventorySnapshot,
 } from "../changes.js";
-import { scanApplications } from "../scanner.js";
+import { scanLocalInventory } from "../inventory-scan.js";
 import { readSkillContent } from "../skill-content.js";
 import type { DesktopScanResult, InventoryChanges, SkillContentResult } from "../types.js";
 
@@ -24,7 +24,7 @@ let latestSnapshot: InventorySnapshot | null = null;
 
 function registerHandlers(): void {
   ipcMain.handle(SCAN_CHANNEL, async (): Promise<DesktopScanResult> => {
-    const result = await scanApplications({ applications: await getScanApplications() });
+    const result = await scanLocalInventory({ applications: await getScanApplications() });
     const scannedAt = new Date().toISOString();
     const snapshot = await createInventorySnapshot(result.skills, scannedAt);
     const baselinePath = getBaselinePath();
