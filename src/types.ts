@@ -10,6 +10,8 @@ export type InventoryKind = "skills" | "mcp";
 export type McpTransport = "stdio" | "http" | "sse" | "unknown";
 export type McpConfigurationFormat = "json" | "toml";
 export type McpStatus = "valid" | "invalid" | "duplicate";
+export type CapabilityMatchBasis =
+  "single-application" | "shared-location" | "shared-endpoint" | "matching-name";
 
 export type MetadataStatus = "valid" | "incomplete" | "missing" | "invalid" | "unreadable";
 
@@ -107,6 +109,26 @@ export interface DiscoveredMcpServer {
   status: McpStatus;
   issues: string[];
 }
+
+export interface SkillCapabilityGroup {
+  id: string;
+  kind: "skill";
+  name: string;
+  applications: ApplicationId[];
+  matchBasis: CapabilityMatchBasis;
+  definitions: DiscoveredSkill[];
+}
+
+export interface McpCapabilityGroup {
+  id: string;
+  kind: "mcp";
+  name: string;
+  applications: ApplicationId[];
+  matchBasis: CapabilityMatchBasis;
+  definitions: DiscoveredMcpServer[];
+}
+
+export type CapabilityGroup = SkillCapabilityGroup | McpCapabilityGroup;
 
 export interface DesktopScanResult extends ScanResult {
   scannedAt: string;

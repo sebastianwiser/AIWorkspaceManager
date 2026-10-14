@@ -7,19 +7,23 @@ import {
   getMcpServerIdentity,
   getSkillIdentity,
 } from "../../inventory.js";
+import { createMcpCapabilityGroups, createSkillCapabilityGroups } from "../../capabilities.js";
 import { getRenderableMarkdown } from "../../markdown.js";
 import type {
   ApplicationChoice,
+  CapabilityGroup,
   DesktopScanResult,
   DiscoveredMcpServer,
   DiscoveredSkill,
   InventoryKind,
   InventorySortField,
   McpStatus,
+  McpCapabilityGroup,
   MetadataStatus,
   SkillChange,
   SkillChangeType,
   SkillContentResult,
+  SkillCapabilityGroup,
   SkillSourceId,
   SortOrder,
 } from "../../types.js";
@@ -107,6 +111,7 @@ export function App() {
 
   const allSkills = scanResult?.skills ?? [];
   const allChanges = scanResult?.changes.items ?? [];
+  const skillCapabilityGroups = useMemo(() => createSkillCapabilityGroups(allSkills), [allSkills]);
   const sourceSkills = useMemo(
     () =>
       mode === "inventory"
@@ -149,6 +154,9 @@ export function App() {
           (change) => getSkillIdentity(change.skill) === getSkillIdentity(selectedSkill),
         ) ?? null)
       : null;
+  const selectedCapability = selectedSkill
+    ? findSkillCapabilityGroup(skillCapabilityGroups, selectedSkill)
+    : null;
   const chatGptCount = allSkills.filter((skill) => skill.application === "chatgpt").length;
   const claudeCount = allSkills.filter((skill) => skill.application === "claude").length;
   const attentionCount = allSkills.filter((skill) => skill.metadataStatus !== "valid").length;
@@ -286,11 +294,16 @@ export function App() {
               )}
             </section>
 
-            <section className="stats-grid" aria-label="Inventory summary">
-              <StatCard label="Total definitions" value={allSkills.length} tone="ink" />
-              <StatCard label="ChatGPT" value={chatGptCount} tone="green" />
-              <StatCard label="Claude" value={claudeCount} tone="orange" />
-              <StatCard label="Needs attention" value={attentionCount} tone="yellow" />
+            <section className="summary-strip" aria-label="Inventory summary">
+              <SummaryMetric
+                label="Capability groups"
+                value={skillCapabilityGroups.length}
+                tone="ink"
+              />
+              <SummaryMetric label="Definitions" value={allSkills.length} tone="ink" />
+              <SummaryMetric label="ChatGPT" value={chatGptCount} tone="green" />
+              <SummaryMetric label="Claude" value={claudeCount} tone="orange" />
+              <SummaryMetric label="Needs attention" value={attentionCount} tone="yellow" />
             </section>
 
             {scanResult && (
@@ -466,6 +479,7 @@ export function App() {
                         skill={skill}
                         selected={getSkillIdentity(skill) === selectedSkillId}
                         variantCount={variantCounts.get(variantKey(skill)) ?? 1}
+                        capability={findSkillCapabilityGroup(skillCapabilityGroups, skill)}
                         change={
                           mode === "changes"
                             ? (allChanges.find(
@@ -491,6 +505,7 @@ export function App() {
                       key={`${getSkillIdentity(selectedSkill)}:${selectedChange?.type ?? "inventory"}`}
                       skill={selectedSkill}
                       change={selectedChange}
+                      capability={selectedCapability}
                     />
                   ) : (
                     <EmptyDetails />
@@ -526,6 +541,7 @@ function McpInventoryPanel({
   const [project, setProject] = useState<ProjectFilter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const servers = scanResult?.mcpServers ?? [];
+  const capabilityGroups = useMemo(() => createMcpCapabilityGroups(servers), [servers]);
   const projects = useMemo(
     () => getMcpProjectOptions(servers, application),
     [servers, application],
@@ -560,6 +576,7 @@ function McpInventoryPanel({
 
   const selected =
     filtered.find((server) => getMcpServerIdentity(server) === selectedId) ?? filtered[0] ?? null;
+  const selectedCapability = selected ? findMcpCapabilityGroup(capabilityGroups, selected) : null;
   const invalidCount = servers.filter((server) => server.status !== "valid").length;
   const mcpWarnings =
     scanResult?.diagnostics.filter(
@@ -586,19 +603,20 @@ function McpInventoryPanel({
         )}
       </section>
 
-      <section className="stats-grid" aria-label="MCP inventory summary">
-        <StatCard label="Configured servers" value={servers.length} tone="ink" />
-        <StatCard
+      <section className="summary-strip" aria-label="MCP inventory summary">
+        <SummaryMetric label="Connection groups" value={capabilityGroups.length} tone="ink" />
+        <SummaryMetric label="Configurations" value={servers.length} tone="ink" />
+        <SummaryMetric
           label="ChatGPT"
           value={servers.filter((server) => server.application === "chatgpt").length}
           tone="green"
         />
-        <StatCard
+        <SummaryMetric
           label="Claude"
           value={servers.filter((server) => server.application === "claude").length}
           tone="orange"
         />
-        <StatCard label="Needs attention" value={invalidCount} tone="yellow" />
+        <SummaryMetric label="Needs attention" value={invalidCount} tone="yellow" />
       </section>
 
       {error && (
@@ -693,6 +711,7 @@ function McpInventoryPanel({
                 <McpServerRow
                   key={getMcpServerIdentity(server)}
                   server={server}
+                  capability={findMcpCapabilityGroup(capabilityGroups, server)}
                   selected={getMcpServerIdentity(server) === selectedId}
                   onSelect={() => setSelectedId(getMcpServerIdentity(server))}
                 />
@@ -709,7 +728,11 @@ function McpInventoryPanel({
             )}
           </div>
           <aside className="detail-panel" aria-label="Selected MCP server details">
-            {selected ? <McpServerDetails server={selected} /> : <EmptyMcpDetails />}
+            {selected ? (
+              <McpServerDetails server={selected} capability={selectedCapability} />
+            ) : (
+              <EmptyMcpDetails />
+            )}
           </aside>
         </div>
       </section>
@@ -719,10 +742,12 @@ function McpInventoryPanel({
 
 function McpServerRow({
   server,
+  capability,
   selected,
   onSelect,
 }: {
   server: DiscoveredMcpServer;
+  capability: McpCapabilityGroup | null;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -734,6 +759,9 @@ function McpServerRow({
       <span className="skill-row-copy">
         <span className="skill-name-line">
           <strong>{server.name}</strong>
+          {capability && capability.applications.length > 1 && (
+            <span className="coverage-badge">{capability.applications.length} apps</span>
+          )}
         </span>
         <span>{server.command ?? server.url ?? "No usable endpoint configured"}</span>
         <span className="row-meta">
@@ -748,7 +776,13 @@ function McpServerRow({
   );
 }
 
-function McpServerDetails({ server }: { server: DiscoveredMcpServer }) {
+function McpServerDetails({
+  server,
+  capability,
+}: {
+  server: DiscoveredMcpServer;
+  capability: McpCapabilityGroup | null;
+}) {
   return (
     <div className="detail-content">
       <div className="detail-heading">
@@ -760,6 +794,7 @@ function McpServerDetails({ server }: { server: DiscoveredMcpServer }) {
           <h3>{server.name}</h3>
         </div>
       </div>
+      {capability && <CapabilityCoverage capability={capability} />}
       <dl className="detail-list">
         <div>
           <dt>Status</dt>
@@ -848,6 +883,45 @@ function McpStatusPill({ status }: { status: McpStatus }) {
   return <span className={`status-pill status-${status}`}>{capitalize(status)}</span>;
 }
 
+function CapabilityCoverage({ capability }: { capability: CapabilityGroup }) {
+  const isCrossApp = capability.applications.length > 1;
+  const evidence =
+    capability.matchBasis === "shared-location"
+      ? "Both apps use the same local skill definition."
+      : capability.matchBasis === "shared-endpoint"
+        ? "Both apps point to the same local server endpoint."
+        : capability.matchBasis === "matching-name"
+          ? "The names match across apps. Review the definitions before treating them as identical."
+          : `Found in ${applicationLabel(capability.applications[0])} only.`;
+
+  return (
+    <section
+      className={`capability-coverage${isCrossApp ? " cross-app" : ""}`}
+      aria-label="Cross-app availability"
+    >
+      <div className="coverage-heading">
+        <div>
+          <span className="coverage-kicker">Cross-app identity</span>
+          <strong>{isCrossApp ? "Available across apps" : "One app found"}</strong>
+        </div>
+        <div className="application-chips" aria-label="Applications">
+          {capability.applications.map((application) => (
+            <span key={application} className={`application-chip app-chip-${application}`}>
+              {applicationLabel(application)}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p>{evidence}</p>
+      {capability.definitions.length > 1 && (
+        <span className="definition-count">
+          {capability.definitions.length} local definitions represented
+        </span>
+      )}
+    </section>
+  );
+}
+
 function EmptyMcpDetails() {
   return (
     <div className="empty-details">
@@ -915,9 +989,9 @@ function ChangeSummary({
   );
 }
 
-function StatCard({ label, value, tone }: { label: string; value: number; tone: string }) {
+function SummaryMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
   return (
-    <article className={`stat-card stat-${tone}`}>
+    <article className={`summary-metric stat-${tone}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </article>
@@ -947,12 +1021,14 @@ function SelectControl({
 
 function SkillRow({
   skill,
+  capability,
   selected,
   variantCount,
   change,
   onSelect,
 }: {
   skill: DiscoveredSkill;
+  capability: SkillCapabilityGroup | null;
   selected: boolean;
   variantCount: number;
   change: SkillChange | null;
@@ -967,6 +1043,9 @@ function SkillRow({
         <span className="skill-name-line">
           <strong>{skill.name}</strong>
           {variantCount > 1 && <span className="variant-badge">{variantCount} variants</span>}
+          {capability && capability.applications.length > 1 && (
+            <span className="coverage-badge">{capability.applications.length} apps</span>
+          )}
         </span>
         <span>{skill.description ?? "No description provided."}</span>
         <span className="row-meta">
@@ -981,7 +1060,15 @@ function SkillRow({
   );
 }
 
-function SkillDetails({ skill, change }: { skill: DiscoveredSkill; change: SkillChange | null }) {
+function SkillDetails({
+  skill,
+  change,
+  capability,
+}: {
+  skill: DiscoveredSkill;
+  change: SkillChange | null;
+  capability: SkillCapabilityGroup | null;
+}) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [contentResult, setContentResult] = useState<SkillContentResult | null>(null);
   const detailRef = useRef<HTMLDivElement>(null);
@@ -1033,6 +1120,8 @@ function SkillDetails({ skill, change }: { skill: DiscoveredSkill; change: Skill
       </div>
 
       {change && <ChangeNotice change={change} />}
+
+      {capability && <CapabilityCoverage capability={capability} />}
 
       <div
         className={`detail-tabs${canReadContent ? "" : " overview-only"}`}
@@ -1293,6 +1382,34 @@ function EmptyDetails() {
 
 function variantKey(skill: DiscoveredSkill): string {
   return `${skill.application}:${skill.name.toLocaleLowerCase()}`;
+}
+
+function findSkillCapabilityGroup(
+  groups: readonly SkillCapabilityGroup[],
+  skill: DiscoveredSkill,
+): SkillCapabilityGroup | null {
+  const identity = getSkillIdentity(skill);
+  return (
+    groups.find((group) =>
+      group.definitions.some((definition) => getSkillIdentity(definition) === identity),
+    ) ?? null
+  );
+}
+
+function findMcpCapabilityGroup(
+  groups: readonly McpCapabilityGroup[],
+  server: DiscoveredMcpServer,
+): McpCapabilityGroup | null {
+  const identity = getMcpServerIdentity(server);
+  return (
+    groups.find((group) =>
+      group.definitions.some((definition) => getMcpServerIdentity(definition) === identity),
+    ) ?? null
+  );
+}
+
+function applicationLabel(application: "chatgpt" | "claude"): string {
+  return application === "chatgpt" ? "ChatGPT" : "Claude";
 }
 
 function countVariants(skills: DiscoveredSkill[]): Map<string, number> {

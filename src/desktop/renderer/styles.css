@@ -1,25 +1,26 @@
 :root {
   font-family:
-    Inter,
+    "Avenir Next",
+    Avenir,
     ui-sans-serif,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
   color: #20251f;
-  background: #f3f1eb;
+  background: #f1efe8;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #20251f;
-  --muted: #6d736b;
-  --line: #deddd5;
-  --paper: #fbfaf6;
-  --green: #176c50;
-  --green-soft: #e2f0e8;
-  --orange: #b85f2d;
-  --orange-soft: #f6e7dd;
-  --yellow: #d7a42c;
-  --yellow-soft: #f8edc8;
+  --muted: #6b7169;
+  --line: #dbdad2;
+  --paper: #fcfbf7;
+  --green: #155f48;
+  --green-soft: #e3eee8;
+  --orange: #a85631;
+  --orange-soft: #f3e6de;
+  --yellow: #b5841c;
+  --yellow-soft: #f5ebcb;
 }
 
 * {
@@ -37,7 +38,9 @@ body,
 body {
   min-height: 100vh;
   overflow-y: auto;
-  background: radial-gradient(circle at 8% 0%, rgb(255 255 255 / 75%), transparent 29rem), #f3f1eb;
+  background:
+    radial-gradient(circle at 8% 0%, rgb(255 255 255 / 82%), transparent 30rem),
+    radial-gradient(circle at 92% 12%, rgb(21 95 72 / 5%), transparent 25rem), #f1efe8;
 }
 
 button,
@@ -225,11 +228,12 @@ main {
 .intro-row h2 {
   max-width: 700px;
   color: #1d221d;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   font-size: clamp(30px, 3vw, 42px);
   font-weight: 500;
   letter-spacing: -0.045em;
   line-height: 1.02;
+  text-wrap: balance;
 }
 
 .intro-row > div > p:last-child {
@@ -247,23 +251,29 @@ main {
   font-size: 12px;
 }
 
-.stats-grid {
+.summary-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: 1.2fr repeat(4, minmax(0, 1fr));
   margin-bottom: 18px;
-}
-
-.stat-card {
-  position: relative;
-  min-height: 78px;
-  padding: 14px 16px;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 15px;
-  background: var(--paper);
+  background: rgb(252 251 247 / 88%);
+  box-shadow: 0 8px 28px rgb(42 45 38 / 4%);
 }
 
-.stat-card span {
+.summary-metric {
+  position: relative;
+  min-height: 82px;
+  padding: 15px 18px;
+  border-left: 1px solid var(--line);
+}
+
+.summary-metric:first-child {
+  border-left: 0;
+}
+
+.summary-metric span {
   display: block;
   margin-bottom: 6px;
   color: #6d736b;
@@ -273,13 +283,14 @@ main {
   text-transform: uppercase;
 }
 
-.stat-card strong {
+.summary-metric strong {
   position: relative;
   z-index: 1;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   font-size: 26px;
   font-weight: 500;
   letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-ink {
@@ -660,7 +671,10 @@ main {
   outline: none;
   background: transparent;
   text-align: left;
-  transition: background 130ms ease;
+  transition:
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
 }
 
 .skill-row:last-child {
@@ -670,11 +684,16 @@ main {
 
 .skill-row:hover {
   background: #f5f5ef;
+  box-shadow: inset 3px 0 rgb(21 95 72 / 25%);
 }
 
 .skill-row.selected {
   background: #eaf1ec;
   box-shadow: inset 3px 0 var(--green);
+}
+
+.skill-row:active {
+  transform: translateY(1px);
 }
 
 .app-monogram {
@@ -684,7 +703,7 @@ main {
   flex: none;
   place-items: center;
   border-radius: 10px;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   font-size: 16px;
   font-weight: 700;
 }
@@ -744,6 +763,19 @@ main {
   font-size: 8px;
   font-weight: 720;
   letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.coverage-badge {
+  flex: none;
+  padding: 2px 6px;
+  color: #165d47;
+  border: 1px solid #b9d3c6;
+  border-radius: 5px;
+  background: #eef6f1;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 
@@ -886,11 +918,94 @@ main {
 
 .detail-heading h3 {
   overflow-wrap: anywhere;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   font-size: 24px;
   font-weight: 500;
   letter-spacing: -0.025em;
   line-height: 1.05;
+}
+
+.capability-coverage {
+  margin: 0 0 18px;
+  padding: 13px 14px;
+  color: #586058;
+  border: 1px solid #d8dcd6;
+  border-radius: 11px;
+  background: rgb(255 255 255 / 72%);
+}
+
+.capability-coverage.cross-app {
+  border-color: #bed5ca;
+  background: linear-gradient(135deg, #edf6f1, #f9f9f5 72%);
+}
+
+.coverage-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coverage-heading > div:first-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.coverage-kicker {
+  color: #798078;
+  font-size: 8px;
+  font-weight: 780;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coverage-heading strong {
+  color: #2c372f;
+  font-size: 12px;
+}
+
+.application-chips {
+  display: flex;
+  flex: none;
+  gap: 5px;
+}
+
+.application-chip {
+  padding: 4px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.app-chip-chatgpt {
+  color: #155f48;
+  border-color: #c6dbd0;
+  background: #e4f0e9;
+}
+
+.app-chip-claude {
+  color: #914925;
+  border-color: #e2cabc;
+  background: #f4e7df;
+}
+
+.capability-coverage p {
+  margin: 9px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.definition-count {
+  display: block;
+  margin-top: 6px;
+  color: #828880;
+  font-size: 8px;
 }
 
 .detail-tabs {
@@ -1383,7 +1498,7 @@ main {
 .empty-details h3 {
   margin-bottom: 6px;
   color: #414741;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: "Iowan Old Style", Charter, Georgia, "Times New Roman", serif;
   font-size: 20px;
   font-weight: 500;
 }
@@ -1474,6 +1589,10 @@ footer {
 }
 
 @media (max-width: 1080px) {
+  .summary-strip {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
   .change-summary {
     grid-template-columns: 1fr auto;
   }

@@ -60,6 +60,9 @@ The current version answers two questions:
 - Identify invalid and same-scope duplicate MCP server definitions.
 - Search and filter MCP servers by application and project.
 - Inspect a formatted, sanitized configuration excerpt in the desktop interface.
+- Group same-named skills and MCP configurations into explainable cross-app capability candidates.
+- Distinguish strong local evidence (a shared file or endpoint) from a name-only match that needs
+  review.
 
 ## What it does not do yet
 
@@ -184,6 +187,14 @@ for same-named variants.
 
 MCP records contain only sanitized commands, arguments, URLs, and configuration excerpts. Literal
 environment and header values are never included.
+
+## Cross-app identity
+
+The desktop app keeps each discovered definition intact while also presenting a capability-level
+view across ChatGPT and Claude. A shared skill file or identical MCP endpoint is shown as strong
+evidence that both applications use the same capability. A matching name at different locations is
+shown as a reviewable candidate, not silently merged. This model is the foundation for future
+relationship and portability views.
 
 ## MCP inventory
 
@@ -460,8 +471,10 @@ The shared scanner will include it automatically.
    removed skill views.
 5. **MVP 2A — Local MCP discovery:** complete with secret-safe parsing, filtering, diagnostics, and
    desktop/CLI inventory views.
-6. **Later pillars:** plugin inspection, workspace composition, auditing, portability, and safe
-   management.
+6. **Cross-app identity foundation:** capability candidates now connect app-specific skill and MCP
+   records with explicit match evidence.
+7. **Later pillars:** MCP status, plugin inspection, full relationship views, auditing, portability,
+   and safe management.
 
 ## Contributing principles
 
