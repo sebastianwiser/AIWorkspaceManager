@@ -69,6 +69,8 @@ test("groups shared skill files across applications with strong evidence", () =>
   assert.deepEqual(groups[0].applications, ["chatgpt", "claude"]);
   assert.equal(groups[0].matchBasis, "shared-location");
   assert.equal(groups[0].definitions.length, 2);
+  assert.equal(groups[0].variants.length, 1);
+  assert.deepEqual(groups[0].variants[0].applications, ["chatgpt", "claude"]);
 });
 
 test("treats same-name skills at different locations as a reviewable candidate", () => {
@@ -83,6 +85,25 @@ test("treats same-name skills at different locations as a reviewable candidate",
   ]);
 
   assert.equal(group.matchBasis, "matching-name");
+  assert.equal(group.variants.length, 2);
+});
+
+test("keeps multiple definitions of one local file inside a single variant", () => {
+  const [group] = createSkillCapabilityGroups([
+    skill(),
+    skill({ application: "claude", applicationName: "Claude" }),
+    skill({
+      directory: "/skills/documents-v2",
+      instructionFile: "/skills/documents-v2/SKILL.md",
+    }),
+  ]);
+
+  assert.equal(group.definitions.length, 3);
+  assert.equal(group.variants.length, 2);
+  assert.equal(
+    group.variants.find((variant) => variant.definitions.length === 2)?.applications.length,
+    2,
+  );
 });
 
 test("groups same-name MCP definitions and explains endpoint evidence", () => {

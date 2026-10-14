@@ -25,6 +25,7 @@ import type {
   SkillContentResult,
   SkillCapabilityGroup,
   SkillSourceId,
+  SkillVariantGroup,
   SortOrder,
 } from "../../types.js";
 import { AlertIcon, FolderIcon, MarkIcon, RefreshIcon, SearchIcon, ShieldIcon } from "./Icons.js";
@@ -86,7 +87,7 @@ export function App() {
   const [project, setProject] = useState<ProjectFilter>("all");
   const [sortBy, setSortBy] = useState<InventorySortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [selectedCapabilityId, setSelectedCapabilityId] = useState<string | null>(null);
 
   const refreshInventory = useCallback(async () => {
     setIsScanning(true);
@@ -121,6 +122,10 @@ export function App() {
             .map((change) => change.skill),
     [allChanges, allSkills, changeType, mode],
   );
+  const sourceCapabilityGroups = useMemo(
+    () => createSkillCapabilityGroups(sourceSkills),
+    [sourceSkills],
+  );
 
   const inventory = useMemo(() => {
     return createInventoryView(sourceSkills, {
@@ -135,28 +140,39 @@ export function App() {
     });
   }, [application, mode, project, query, sortBy, sortOrder, source, sourceSkills, status]);
 
+  const visibleCapabilityGroups = useMemo(() => {
+    const orderedIds: string[] = [];
+    for (const skill of inventory) {
+      const group = findSkillCapabilityGroup(sourceCapabilityGroups, skill);
+      if (group && !orderedIds.includes(group.id)) orderedIds.push(group.id);
+    }
+    return orderedIds
+      .map((id) => sourceCapabilityGroups.find((group) => group.id === id))
+      .filter((group): group is SkillCapabilityGroup => Boolean(group));
+  }, [inventory, sourceCapabilityGroups]);
+
   useEffect(() => {
-    if (inventory.length === 0) {
-      setSelectedSkillId(null);
+    if (visibleCapabilityGroups.length === 0) {
+      setSelectedCapabilityId(null);
       return;
     }
 
-    if (!inventory.some((skill) => getSkillIdentity(skill) === selectedSkillId)) {
-      setSelectedSkillId(getSkillIdentity(inventory[0]));
+    if (!visibleCapabilityGroups.some((group) => group.id === selectedCapabilityId)) {
+      setSelectedCapabilityId(visibleCapabilityGroups[0].id);
     }
-  }, [inventory, selectedSkillId]);
+  }, [selectedCapabilityId, visibleCapabilityGroups]);
 
-  const selectedSkill =
-    inventory.find((skill) => getSkillIdentity(skill) === selectedSkillId) ?? inventory[0] ?? null;
-  const selectedChange =
-    mode === "changes" && selectedSkill
-      ? (allChanges.find(
-          (change) => getSkillIdentity(change.skill) === getSkillIdentity(selectedSkill),
-        ) ?? null)
-      : null;
-  const selectedCapability = selectedSkill
-    ? findSkillCapabilityGroup(skillCapabilityGroups, selectedSkill)
-    : null;
+  const selectedCapability =
+    visibleCapabilityGroups.find((group) => group.id === selectedCapabilityId) ??
+    visibleCapabilityGroups[0] ??
+    null;
+  const selectedChanges = selectedCapability
+    ? allChanges.filter((change) =>
+        selectedCapability.definitions.some(
+          (definition) => getSkillIdentity(definition) === getSkillIdentity(change.skill),
+        ),
+      )
+    : [];
   const chatGptCount = allSkills.filter((skill) => skill.application === "chatgpt").length;
   const claudeCount = allSkills.filter((skill) => skill.application === "claude").length;
   const attentionCount = allSkills.filter((skill) => skill.metadataStatus !== "valid").length;
@@ -164,7 +180,6 @@ export function App() {
     scanResult?.diagnostics.filter((item) => item.severity === "warning").length ?? 0;
   const missingLocationCount =
     scanResult?.diagnostics.filter((item) => item.code === "LOCATION_NOT_FOUND").length ?? 0;
-  const variantCounts = useMemo(() => countVariants(inventory), [inventory]);
   const projectOptionSkills = useMemo(
     () => [...allSkills, ...allChanges.map((change) => change.skill)],
     [allChanges, allSkills],
@@ -459,9 +474,9 @@ export function App() {
 
               <div className="inventory-meta">
                 <span>
-                  <strong>{inventory.length}</strong> of{" "}
-                  {mode === "inventory" ? allSkills.length : allChanges.length}{" "}
-                  {mode === "inventory" ? "definitions" : "changes"}
+                  <strong>{visibleCapabilityGroups.length}</strong> skill blocks ·{" "}
+                  {inventory.length} matching{" "}
+                  {inventory.length === 1 ? "definition" : "definitions"}
                 </span>
                 {missingLocationCount > 0 && (
                   <span>{missingLocationCount} optional locations not present</span>
@@ -472,22 +487,23 @@ export function App() {
                 <div className="skill-list" aria-label="Skills">
                   {isScanning && !scanResult ? (
                     <LoadingList />
-                  ) : inventory.length > 0 ? (
-                    inventory.map((skill) => (
-                      <SkillRow
-                        key={getSkillIdentity(skill)}
-                        skill={skill}
-                        selected={getSkillIdentity(skill) === selectedSkillId}
-                        variantCount={variantCounts.get(variantKey(skill)) ?? 1}
-                        capability={findSkillCapabilityGroup(skillCapabilityGroups, skill)}
-                        change={
+                  ) : visibleCapabilityGroups.length > 0 ? (
+                    visibleCapabilityGroups.map((capability) => (
+                      <SkillCapabilityRow
+                        key={capability.id}
+                        capability={capability}
+                        selected={capability.id === selectedCapabilityId}
+                        changes={
                           mode === "changes"
-                            ? (allChanges.find(
-                                (item) => getSkillIdentity(item.skill) === getSkillIdentity(skill),
-                              ) ?? null)
-                            : null
+                            ? allChanges.filter((change) =>
+                                capability.definitions.some(
+                                  (definition) =>
+                                    getSkillIdentity(definition) === getSkillIdentity(change.skill),
+                                ),
+                              )
+                            : []
                         }
-                        onSelect={() => setSelectedSkillId(getSkillIdentity(skill))}
+                        onSelect={() => setSelectedCapabilityId(capability.id)}
                       />
                     ))
                   ) : (
@@ -500,12 +516,11 @@ export function App() {
                 </div>
 
                 <aside className="detail-panel" aria-label="Selected skill details">
-                  {selectedSkill ? (
+                  {selectedCapability ? (
                     <SkillDetails
-                      key={`${getSkillIdentity(selectedSkill)}:${selectedChange?.type ?? "inventory"}`}
-                      skill={selectedSkill}
-                      change={selectedChange}
+                      key={`${selectedCapability.id}:${mode}`}
                       capability={selectedCapability}
+                      changes={selectedChanges}
                     />
                   ) : (
                     <EmptyDetails />
@@ -1019,64 +1034,93 @@ function SelectControl({
   );
 }
 
-function SkillRow({
-  skill,
+function SkillCapabilityRow({
   capability,
   selected,
-  variantCount,
-  change,
+  changes,
   onSelect,
 }: {
-  skill: DiscoveredSkill;
-  capability: SkillCapabilityGroup | null;
+  capability: SkillCapabilityGroup;
   selected: boolean;
-  variantCount: number;
-  change: SkillChange | null;
+  changes: readonly SkillChange[];
   onSelect: () => void;
 }) {
+  const description =
+    capability.definitions.find((definition) => definition.description)?.description ??
+    "No description provided.";
+  const status = getCapabilityMetadataStatus(capability);
+
   return (
-    <button className={`skill-row${selected ? " selected" : ""}`} type="button" onClick={onSelect}>
-      <span className={`app-monogram app-${skill.application}`}>
-        {skill.application === "chatgpt" ? "G" : "C"}
+    <button
+      className={`skill-row capability-row${selected ? " selected" : ""}`}
+      type="button"
+      onClick={onSelect}
+    >
+      <span className="capability-mark">
+        <MarkIcon />
       </span>
       <span className="skill-row-copy">
         <span className="skill-name-line">
-          <strong>{skill.name}</strong>
-          {variantCount > 1 && <span className="variant-badge">{variantCount} variants</span>}
-          {capability && capability.applications.length > 1 && (
-            <span className="coverage-badge">{capability.applications.length} apps</span>
+          <strong>{capability.name}</strong>
+          {capability.variants.length > 1 && (
+            <span className="variant-badge">{capability.variants.length} variants</span>
           )}
         </span>
-        <span>{skill.description ?? "No description provided."}</span>
+        <span>{description}</span>
         <span className="row-meta">
-          {skill.applicationName} · {skill.projectName ?? skill.sourceName}
+          <span className="row-apps">
+            {capability.applications.map((app) => (
+              <span key={app} className={`row-app row-app-${app}`}>
+                {applicationLabel(app)}
+              </span>
+            ))}
+          </span>
+          <span>
+            {capability.definitions.length}{" "}
+            {capability.definitions.length === 1 ? "definition" : "definitions"}
+          </span>
         </span>
       </span>
       <span className="row-status">
-        {change && <ChangePill type={change.type} />}
-        <StatusPill status={skill.metadataStatus} />
+        {changes.length === 1 && <ChangePill type={changes[0].type} />}
+        {changes.length > 1 && <span className="change-pill">{changes.length} changes</span>}
+        <StatusPill status={status} />
       </span>
     </button>
   );
 }
 
 function SkillDetails({
-  skill,
-  change,
   capability,
+  changes,
 }: {
-  skill: DiscoveredSkill;
-  change: SkillChange | null;
-  capability: SkillCapabilityGroup | null;
+  capability: SkillCapabilityGroup;
+  changes: readonly SkillChange[];
 }) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [contentResult, setContentResult] = useState<SkillContentResult | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState(capability.variants[0]?.id ?? "");
   const detailRef = useRef<HTMLDivElement>(null);
+  const variant =
+    capability.variants.find((item) => item.id === selectedVariantId) ?? capability.variants[0];
+  const skill = getVariantRepresentative(variant);
+  const change =
+    changes.find((item) =>
+      variant.definitions.some(
+        (definition) => getSkillIdentity(definition) === getSkillIdentity(item.skill),
+      ),
+    ) ?? null;
   const canReadContent = change?.type !== "removed";
 
   useEffect(() => {
+    if (!capability.variants.some((item) => item.id === selectedVariantId)) {
+      setSelectedVariantId(capability.variants[0]?.id ?? "");
+    }
+  }, [capability.variants, selectedVariantId]);
+
+  useEffect(() => {
     detailRef.current?.scrollTo({ top: 0 });
-  }, [activeTab, skill.instructionFile]);
+  }, [activeTab, variant.instructionFile]);
 
   useEffect(() => {
     if (activeTab !== "contents" || !canReadContent) {
@@ -1087,7 +1131,7 @@ function SkillDetails({
     setContentResult(null);
 
     void window.skillManager
-      .readSkillContent(skill.instructionFile)
+      .readSkillContent(variant.instructionFile)
       .then((result) => {
         if (!ignoreResult) {
           setContentResult(result);
@@ -1105,23 +1149,29 @@ function SkillDetails({
     return () => {
       ignoreResult = true;
     };
-  }, [activeTab, canReadContent, skill.instructionFile]);
+  }, [activeTab, canReadContent, variant.instructionFile]);
 
   return (
     <div className="detail-content" ref={detailRef}>
       <div className="detail-heading">
-        <span className={`app-monogram app-${skill.application}`}>
-          {skill.application === "chatgpt" ? "G" : "C"}
+        <span className="capability-detail-mark">
+          <MarkIcon />
         </span>
         <div>
-          <p>{skill.applicationName}</p>
-          <h3>{skill.name}</h3>
+          <p>Skill block</p>
+          <h3>{capability.name}</h3>
         </div>
       </div>
 
       {change && <ChangeNotice change={change} />}
 
-      {capability && <CapabilityCoverage capability={capability} />}
+      <CapabilityCoverage capability={capability} />
+
+      <SkillVariantSelector
+        capability={capability}
+        selectedVariant={variant}
+        onSelect={setSelectedVariantId}
+      />
 
       <div
         className={`detail-tabs${canReadContent ? "" : " overview-only"}`}
@@ -1156,6 +1206,60 @@ function SkillDetails({
         <SkillContents result={contentResult} />
       )}
     </div>
+  );
+}
+
+function SkillVariantSelector({
+  capability,
+  selectedVariant,
+  onSelect,
+}: {
+  capability: SkillCapabilityGroup;
+  selectedVariant: SkillVariantGroup;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <section className="variant-section" aria-label="Skill variants">
+      <div className="variant-section-heading">
+        <div>
+          <span>Local definitions</span>
+          <strong>
+            {capability.variants.length === 1
+              ? "One shared variant"
+              : `${capability.variants.length} variants found`}
+          </strong>
+        </div>
+        {capability.variants.length > 1 && (
+          <div className="variant-switch" role="tablist" aria-label="Choose skill variant">
+            {capability.variants.map((variant, index) => (
+              <button
+                key={variant.id}
+                type="button"
+                role="tab"
+                aria-selected={variant.id === selectedVariant.id}
+                className={variant.id === selectedVariant.id ? "active" : ""}
+                onClick={() => onSelect(variant.id)}
+              >
+                Variant {index + 1}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="variant-connections">
+        {selectedVariant.definitions.map((definition) => (
+          <div className="variant-connection" key={getSkillIdentity(definition)}>
+            <span className={`connection-dot connection-${definition.application}`} />
+            <div>
+              <strong>{definition.applicationName}</strong>
+              <span>{definition.projectName ?? definition.sourceName}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      <code className="variant-path">{shortenPath(selectedVariant.instructionFile)}</code>
+    </section>
   );
 }
 
@@ -1380,10 +1484,6 @@ function EmptyDetails() {
   );
 }
 
-function variantKey(skill: DiscoveredSkill): string {
-  return `${skill.application}:${skill.name.toLocaleLowerCase()}`;
-}
-
 function findSkillCapabilityGroup(
   groups: readonly SkillCapabilityGroup[],
   skill: DiscoveredSkill,
@@ -1412,13 +1512,21 @@ function applicationLabel(application: "chatgpt" | "claude"): string {
   return application === "chatgpt" ? "ChatGPT" : "Claude";
 }
 
-function countVariants(skills: DiscoveredSkill[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const skill of skills) {
-    const key = variantKey(skill);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+function getVariantRepresentative(variant: SkillVariantGroup): DiscoveredSkill {
+  return (
+    variant.definitions.find((definition) => definition.metadataStatus === "valid") ??
+    variant.definitions[0]
+  );
+}
+
+function getCapabilityMetadataStatus(capability: SkillCapabilityGroup): MetadataStatus {
+  const priority: MetadataStatus[] = ["unreadable", "invalid", "missing", "incomplete", "valid"];
+  for (const status of priority) {
+    if (capability.definitions.some((definition) => definition.metadataStatus === status)) {
+      return status;
+    }
   }
-  return counts;
+  return "valid";
 }
 
 function countChanges(changes: readonly SkillChange[]): Record<SkillChangeType, number> {

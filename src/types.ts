@@ -117,6 +117,14 @@ export interface SkillCapabilityGroup {
   applications: ApplicationId[];
   matchBasis: CapabilityMatchBasis;
   definitions: DiscoveredSkill[];
+  variants: SkillVariantGroup[];
+}
+
+export interface SkillVariantGroup {
+  id: string;
+  instructionFile: string;
+  applications: ApplicationId[];
+  definitions: DiscoveredSkill[];
 }
 
 export interface McpCapabilityGroup {

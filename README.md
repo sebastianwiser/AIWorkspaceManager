@@ -196,6 +196,11 @@ evidence that both applications use the same capability. A matching name at diff
 shown as a reviewable candidate, not silently merged. This model is the foundation for future
 relationship and portability views.
 
+Skills are displayed as one block per capability instead of one row per application record. Each
+block shows its ChatGPT and Claude availability. When matching definitions live in more than one
+local file, the detail panel provides a variant switch and shows which application, source, project,
+and file belong to the selected variant.
+
 ## MCP inventory
 
 Use the **Skills | MCP Servers** switch in the desktop app, or `--kind mcp` in the CLI. MCP servers

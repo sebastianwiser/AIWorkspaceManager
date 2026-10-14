@@ -16,14 +16,18 @@ import type {
 export function createSkillCapabilityGroups(
   skills: readonly DiscoveredSkill[],
 ): SkillCapabilityGroup[] {
-  return groupByNormalizedName(skills, "skill").map(([normalizedName, definitions]) => ({
-    id: `skill:${normalizedName}`,
-    kind: "skill",
-    name: chooseDisplayName(definitions),
-    applications: uniqueApplications(definitions),
-    matchBasis: getSkillMatchBasis(definitions),
-    definitions,
-  }));
+  return groupByNormalizedName(skills, "skill").map(([normalizedName, definitions]) => {
+    const id = `skill:${normalizedName}`;
+    return {
+      id,
+      kind: "skill",
+      name: chooseDisplayName(definitions),
+      applications: uniqueApplications(definitions),
+      matchBasis: getSkillMatchBasis(definitions),
+      definitions,
+      variants: createSkillVariants(id, definitions),
+    };
+  });
 }
 
 export function createMcpCapabilityGroups(
@@ -71,6 +75,24 @@ function uniqueApplications<T extends { application: ApplicationId }>(
   definitions: readonly T[],
 ): ApplicationId[] {
   return [...new Set(definitions.map((definition) => definition.application))].sort();
+}
+
+function createSkillVariants(capabilityId: string, definitions: readonly DiscoveredSkill[]) {
+  const byFile = new Map<string, DiscoveredSkill[]>();
+  for (const definition of definitions) {
+    const variant = byFile.get(definition.instructionFile) ?? [];
+    variant.push(definition);
+    byFile.set(definition.instructionFile, variant);
+  }
+
+  return [...byFile.entries()]
+    .map(([instructionFile, variantDefinitions]) => ({
+      id: `${capabilityId}:variant:${instructionFile}`,
+      instructionFile,
+      applications: uniqueApplications(variantDefinitions),
+      definitions: variantDefinitions,
+    }))
+    .sort((left, right) => left.instructionFile.localeCompare(right.instructionFile));
 }
 
 function getSkillMatchBasis(definitions: readonly DiscoveredSkill[]): CapabilityMatchBasis {
