@@ -215,3 +215,128 @@ test("reports malformed manifests and attaches only skills within a plugin root"
     ["inside"],
   );
 });
+
+test("keeps one shared plugin root for both applications", async (t) => {
+  const root = await temporaryDirectory(t);
+  await fs.writeFile(
+    path.join(root, "plugin.json"),
+    JSON.stringify({ name: "shared", description: "Portable plugin." }),
+  );
+  const result = await discoverPlugins({
+    locations: ["chatgpt", "claude"].map((application) => ({
+      application: application as "chatgpt" | "claude",
+      path: root,
+      origin: "local" as const,
+      originName: "Shared",
+    })),
+  });
+  assert.deepEqual(
+    result.plugins.map((plugin) => plugin.application),
+    ["chatgpt", "claude"],
+  );
+});
+
+test("labels cached Codex bundles without claiming installation", async (t) => {
+  const home = await temporaryDirectory(t);
+  const pluginRoot = path.join(home, ".codex", "plugins", "cache", "channel", "example", "1.0");
+  await fs.mkdir(pluginRoot, { recursive: true });
+  await fs.writeFile(
+    path.join(pluginRoot, "plugin.json"),
+    JSON.stringify({ name: "example", description: "Cached bundle." }),
+  );
+  const result = await discoverPlugins({ homeDirectory: home, projects: [] });
+  assert.equal(result.plugins[0]?.installationStatus, "cached");
+});
+
+test("skips Claude install records that point outside its plugin directory", async (t) => {
+  const home = await temporaryDirectory(t);
+  const outside = path.join(home, "outside");
+  await fs.mkdir(outside);
+  await fs.mkdir(path.join(home, ".claude", "plugins"), { recursive: true });
+  await fs.writeFile(
+    path.join(outside, "plugin.json"),
+    JSON.stringify({ name: "outside", description: "Not a trusted install." }),
+  );
+  await fs.writeFile(
+    path.join(home, ".claude", "plugins", "installed_plugins.json"),
+    JSON.stringify({ plugins: { "outside@market": [{ installPath: outside }] } }),
+  );
+  const result = await discoverPlugins({ homeDirectory: home, projects: [] });
+  assert.deepEqual(result.plugins, []);
+  assert.equal(result.diagnostics[0]?.code, "PLUGIN_RECORD_INVALID");
+});
+
+test("does not include secret snippets in malformed manifest diagnostics", async (t) => {
+  const root = await temporaryDirectory(t);
+  await fs.writeFile(path.join(root, "plugin.json"), '{"token": sample-private-secret}');
+  const result = await discoverPlugins({
+    locations: [{ application: "chatgpt", path: root, origin: "local", originName: "Local" }],
+  });
+  assert.equal(result.diagnostics[0]?.code, "PLUGIN_MANIFEST_INVALID");
+  assert.doesNotMatch(JSON.stringify(result), /sample-private-secret/);
+});
+
+test("does not read plugin component files through intermediate symlinks", async (t) => {
+  const root = await temporaryDirectory(t);
+  const pluginRoot = path.join(root, "plugin");
+  const external = path.join(root, "outside");
+  await Promise.all([fs.mkdir(pluginRoot), fs.mkdir(external)]);
+  await fs.writeFile(
+    path.join(pluginRoot, "plugin.json"),
+    JSON.stringify({ name: "example", description: "Example.", mcpServers: "./linked/.mcp.json" }),
+  );
+  await fs.writeFile(
+    path.join(external, ".mcp.json"),
+    JSON.stringify({ mcpServers: { shouldNotAppear: { command: "node" } } }),
+  );
+  await fs.symlink(external, path.join(pluginRoot, "linked"));
+  const result = await discoverPlugins({
+    locations: [{ application: "chatgpt", path: pluginRoot, origin: "local", originName: "Local" }],
+  });
+  assert.deepEqual(result.plugins[0]?.mcpServers, []);
+});
+
+test("assigns a nested plugin skill only to its closest owning bundle", async (t) => {
+  const root = await temporaryDirectory(t);
+  const nested = path.join(root, "nested");
+  await fs.mkdir(nested);
+  await Promise.all([
+    fs.writeFile(
+      path.join(root, "plugin.json"),
+      JSON.stringify({ name: "outer", description: "Outer." }),
+    ),
+    fs.writeFile(
+      path.join(nested, "plugin.json"),
+      JSON.stringify({ name: "inner", description: "Inner." }),
+    ),
+  ]);
+  const result = await discoverPlugins({
+    locations: [{ application: "chatgpt", path: root, origin: "local", originName: "Local" }],
+  });
+  const skillFile = path.join(nested, "skills", "example", "SKILL.md");
+  const skill: DiscoveredSkill = {
+    application: "chatgpt",
+    applicationName: "ChatGPT",
+    name: "example",
+    folderName: "example",
+    description: null,
+    metadataStatus: "valid",
+    metadataIssues: [],
+    directory: path.dirname(skillFile),
+    instructionFile: skillFile,
+    source: "plugin",
+    sourceName: "Plugin",
+    sourceLabel: "Plugins",
+    scope: "global",
+    projectId: null,
+    projectName: null,
+    projectRoot: null,
+    modifiedAt: null,
+  };
+  const plugins = attachPluginSkills(result.plugins, [skill]);
+  assert.deepEqual(plugins.find((plugin) => plugin.name === "outer")?.skills, []);
+  assert.deepEqual(
+    plugins.find((plugin) => plugin.name === "inner")?.skills.map((item) => item.name),
+    ["example"],
+  );
+});

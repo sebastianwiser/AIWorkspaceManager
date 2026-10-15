@@ -12,6 +12,7 @@ import type {
   SkillScope,
 } from "./types.js";
 import { discoverKnownProjects, type KnownProject } from "./projects.js";
+import { readRegularFileBounded } from "./safe-file.js";
 
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_COMPONENT_BYTES = 2 * 1024 * 1024;
@@ -55,9 +56,10 @@ export async function discoverPlugins(
   options: PluginDiscoveryOptions = {},
 ): Promise<PluginScanResult> {
   const home = options.homeDirectory ?? os.homedir();
-  const projects = options.projects ?? (await discoverKnownProjects());
   const diagnostics: ScanDiagnostic[] = [];
-  const defaults = options.locations ? null : await getDefaultPluginLocations(home, projects);
+  const defaults = options.locations
+    ? null
+    : await getDefaultPluginLocations(home, options.projects ?? (await discoverKnownProjects()));
   const locations = options.locations ?? defaults?.locations ?? [];
   diagnostics.push(...(defaults?.diagnostics ?? []));
   const manifestCandidates: ManifestCandidate[] = [];
@@ -70,9 +72,10 @@ export async function discoverPlugins(
 
   const pluginsByRoot = new Map<string, DiscoveredPlugin>();
   for (const candidate of manifestCandidates.sort(compareManifestCandidates)) {
-    if (pluginsByRoot.has(candidate.pluginRoot)) continue;
+    const identity = `${candidate.location.application}\u0000${candidate.pluginRoot}`;
+    if (pluginsByRoot.has(identity)) continue;
     const result = await readPluginManifest(candidate);
-    if (result.plugin) pluginsByRoot.set(candidate.pluginRoot, result.plugin);
+    if (result.plugin) pluginsByRoot.set(identity, result.plugin);
     if (result.diagnostic) diagnostics.push(result.diagnostic);
   }
 
@@ -91,13 +94,20 @@ export function attachPluginSkills(
   plugins: readonly DiscoveredPlugin[],
   skills: readonly DiscoveredSkill[],
 ): DiscoveredPlugin[] {
-  return plugins.map((plugin) => {
-    const references = skills
+  const owners = new Map<DiscoveredSkill, DiscoveredPlugin>();
+  for (const skill of skills) {
+    const owner = plugins
       .filter(
-        (skill) =>
+        (plugin) =>
           skill.application === plugin.application &&
           isPathInside(plugin.directory, skill.directory),
       )
+      .sort((left, right) => right.directory.length - left.directory.length)[0];
+    if (owner) owners.set(skill, owner);
+  }
+  return plugins.map((plugin) => {
+    const references = skills
+      .filter((skill) => owners.get(skill) === plugin)
       .map((skill) => ({ name: skill.name, instructionFile: skill.instructionFile }))
       .filter(
         (reference, index, items) =>
@@ -166,7 +176,9 @@ async function readClaudeInstallLocations(
     if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_COMPONENT_BYTES) {
       throw new Error("The plugin install record is not a bounded regular file.");
     }
-    document = JSON.parse(await fs.readFile(recordFile, "utf8")) as unknown;
+    document = JSON.parse(
+      (await readRegularFileBounded(recordFile, MAX_COMPONENT_BYTES)).toString("utf8"),
+    ) as unknown;
   } catch (error) {
     if (getNodeErrorCode(error) === "ENOENT") return { locations: [], diagnostics: [] };
     return {
@@ -177,7 +189,8 @@ async function readClaudeInstallLocations(
           location: recordFile,
           severity: "warning",
           code: "PLUGIN_RECORD_INVALID",
-          message: `Could not read Claude's plugin install record: ${getErrorMessage(error)}`,
+          message:
+            "Could not read Claude's plugin install record. Check its format and permissions.",
         },
       ],
     };
@@ -201,13 +214,58 @@ async function readClaudeInstallLocations(
   }
 
   const locations: PluginDiscoveryLocation[] = [];
+  const diagnostics: ScanDiagnostic[] = [];
+  const trustedPluginRoot = await fs.realpath(path.dirname(recordFile)).catch(() => null);
+  if (!trustedPluginRoot) {
+    return {
+      locations: [],
+      diagnostics: [
+        {
+          application: "claude",
+          location: recordFile,
+          severity: "warning",
+          code: "PLUGIN_RECORD_INVALID",
+          message: "Claude's plugin directory changed during discovery.",
+        },
+      ],
+    };
+  }
   for (const [pluginId, rawRecords] of Object.entries(plugins)) {
     if (pluginId === "version" || pluginId === "schemaVersion") continue;
     const records = Array.isArray(rawRecords) ? rawRecords : [rawRecords];
     for (const rawRecord of records) {
       const record = asObject(rawRecord);
       const installPath = getString(record?.installPath) ?? getString(record?.path);
-      if (!installPath || !path.isAbsolute(installPath)) continue;
+      if (
+        !installPath ||
+        !path.isAbsolute(installPath) ||
+        !isPathInside(path.dirname(recordFile), installPath)
+      ) {
+        diagnostics.push({
+          application: "claude",
+          location: recordFile,
+          severity: "warning",
+          code: "PLUGIN_RECORD_INVALID",
+          message:
+            "A plugin install path is missing or outside Claude's plugin directory and was skipped.",
+        });
+        continue;
+      }
+      try {
+        if (!isPathInside(trustedPluginRoot, await fs.realpath(installPath))) {
+          diagnostics.push({
+            application: "claude",
+            location: recordFile,
+            severity: "warning",
+            code: "PLUGIN_RECORD_INVALID",
+            message:
+              "A plugin install path resolves outside Claude's plugin directory and was skipped.",
+          });
+          continue;
+        }
+      } catch {
+        continue;
+      }
       const scopeName = getString(record?.scope)?.toLowerCase();
       const projectRoot = getString(record?.projectPath) ?? getString(record?.projectRoot);
       locations.push({
@@ -225,7 +283,7 @@ async function readClaudeInstallLocations(
       });
     }
   }
-  return { locations, diagnostics: [] };
+  return { locations, diagnostics };
 }
 
 async function findPluginManifests(
@@ -261,13 +319,13 @@ async function walkForManifests(
   let entries;
   try {
     entries = await fs.readdir(currentPath, { withFileTypes: true });
-  } catch (error) {
+  } catch {
     diagnostics.push({
       application: location.application,
       location: currentPath,
       severity: "warning",
       code: "PLUGIN_RECORD_INVALID",
-      message: `Could not inspect this plugin directory: ${getErrorMessage(error)}`,
+      message: "Could not inspect this plugin directory. Check its permissions.",
     });
     return;
   }
@@ -318,11 +376,13 @@ async function readPluginManifest(
       throw new Error("The manifest is not a regular file.");
     if (stats.size > MAX_MANIFEST_BYTES)
       throw new Error("The manifest exceeds the 1 MB safety limit.");
-    const parsed: unknown = JSON.parse(await fs.readFile(candidate.manifestFile, "utf8"));
+    const parsed: unknown = JSON.parse(
+      (await readRegularFileBounded(candidate.manifestFile, MAX_MANIFEST_BYTES)).toString("utf8"),
+    );
     const parsedObject = asObject(parsed);
     if (!parsedObject) throw new Error("The manifest root is not an object.");
     document = parsedObject;
-  } catch (error) {
+  } catch {
     return {
       plugin: null,
       diagnostic: {
@@ -330,7 +390,7 @@ async function readPluginManifest(
         location: candidate.manifestFile,
         severity: "warning",
         code: "PLUGIN_MANIFEST_INVALID",
-        message: `Could not parse this plugin manifest: ${getErrorMessage(error)}`,
+        message: "Could not parse this plugin manifest. Check its format and size.",
       },
     };
   }
@@ -370,14 +430,17 @@ async function readPluginManifest(
       description,
       author: getPersonName(document.author) ?? getString(interfaceMetadata?.developerName),
       license: getString(document.license),
-      homepage: getString(document.homepage) ?? getString(interfaceMetadata?.websiteURL),
-      repository: getRepositoryUrl(document.repository),
+      homepage: safePublicWebsite(
+        getString(document.homepage) ?? getString(interfaceMetadata?.websiteURL),
+      ),
+      repository: safePublicWebsite(getRepositoryUrl(document.repository)),
       scope: candidate.location.scope ?? "global",
       projectId: candidate.location.projectId ?? null,
       projectName: candidate.location.projectName ?? null,
       projectRoot: candidate.location.projectRoot ?? null,
       origin: origin.origin,
       originName: origin.name,
+      installationStatus: getInstallationStatus(candidate, origin.origin),
       directory: candidate.pluginRoot,
       manifestFile: candidate.manifestFile,
       manifestFormat: candidate.format,
@@ -426,7 +489,7 @@ async function readMcpReferences(
   }
 
   for (const configurationFile of candidates) {
-    const names = await readNamedObjectKeys(configurationFile, "mcpServers");
+    const names = await readNamedObjectKeys(pluginRoot, configurationFile, "mcpServers");
     for (const name of names) references.push({ name, configurationFile });
   }
 
@@ -450,17 +513,53 @@ async function readAppNames(
     typeof declared === "string"
       ? resolveInside(pluginRoot, declared)
       : path.join(pluginRoot, ".app.json");
-  return configurationFile ? await readNamedObjectKeys(configurationFile, "apps") : [];
+  return configurationFile ? await readNamedObjectKeys(pluginRoot, configurationFile, "apps") : [];
 }
 
-async function readNamedObjectKeys(filePath: string, containerName: string): Promise<string[]> {
+async function readNamedObjectKeys(
+  pluginRoot: string,
+  filePath: string,
+  containerName: string,
+): Promise<string[]> {
   try {
+    const [realRoot, realFile] = await Promise.all([
+      fs.realpath(pluginRoot),
+      fs.realpath(filePath),
+    ]);
+    if (!isPathInside(realRoot, realFile)) return [];
     const stats = await fs.lstat(filePath);
     if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_COMPONENT_BYTES) return [];
-    const document = asObject(JSON.parse(await fs.readFile(filePath, "utf8")) as unknown);
+    const document = asObject(
+      JSON.parse(
+        (await readRegularFileBounded(filePath, MAX_COMPONENT_BYTES)).toString("utf8"),
+      ) as unknown,
+    );
     return Object.keys(asObject(document?.[containerName]) ?? {}).sort();
   } catch {
     return [];
+  }
+}
+
+function getInstallationStatus(
+  candidate: ManifestCandidate,
+  origin: PluginOrigin,
+): DiscoveredPlugin["installationStatus"] {
+  if (candidate.location.exact && candidate.location.origin === "marketplace") return "confirmed";
+  if (origin === "bundled") return "bundled";
+  if (candidate.pluginRoot.split(path.sep).includes("cache")) return "cached";
+  if (origin === "synced") return "confirmed";
+  return "unverified";
+}
+
+function safePublicWebsite(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:"
+      ? `${url.protocol}//${url.host}/`
+      : null;
+  } catch {
+    return null;
   }
 }
 
@@ -548,10 +647,6 @@ function asObject(value: unknown): Record<string, unknown> | null {
 
 function humanizeIdentifier(value: string): string {
   return value.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function getNodeErrorCode(error: unknown): string | undefined {

@@ -47,7 +47,7 @@ test("discovers JSON stdio servers while redacting secrets", async (t) => {
   assert.equal(server.scope, "project");
   assert.deepEqual(server.environmentVariables, ["GITHUB_TOKEN"]);
   assert.deepEqual(server.arguments, ["server.js", "--api-key", "[REDACTED]", "[REDACTED]"]);
-  assert.match(server.command ?? "", /\[REDACTED\]/);
+  assert.match(server.command ?? "", /REDACTED/);
   for (const secret of ["command-secret", "argument-secret", "environment-secret", "secretvalue"]) {
     assert.doesNotMatch(server.safeConfiguration, new RegExp(secret));
   }
@@ -77,6 +77,73 @@ test("discovers TOML HTTP servers and keeps only credential names", async (t) =>
   assert.match(server.safeConfiguration, /REDACTED/);
 });
 
+test("redacts URL credentials, paths, fragments, unknown fields, and unusual arguments", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configurationFile = path.join(directory, ".mcp.json");
+  const secrets = [
+    "url-user",
+    "url-password",
+    "path-private",
+    "query-private",
+    "fragment-private",
+    "custom-private",
+    "argument-private",
+  ];
+  await fs.writeFile(
+    configurationFile,
+    JSON.stringify({
+      mcpServers: {
+        private: {
+          url: "https://url-user:url-password@example.com/path-private/${TOKEN}?x=query-private#fragment-private",
+          args: ["server.js", "--custom=argument-private", "--header", "Bearer argument-private"],
+          custom: { credentialValue: "custom-private" },
+        },
+      },
+    }),
+  );
+  const result = await scanMcpConfiguration({
+    application: "claude",
+    path: configurationFile,
+    format: "json",
+    scope: "global",
+  });
+  const server = result.mcpServers[0];
+  for (const secret of secrets) {
+    assert.equal(JSON.stringify(server).includes(secret), false, secret);
+  }
+  assert.match(server.url ?? "", /example\.com/);
+  assert.match(server.safeConfiguration, /REDACTED/);
+});
+
+test("only exact private endpoints receive the same opaque cross-app identity", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const first = path.join(directory, "one.json");
+  const second = path.join(directory, "two.json");
+  const third = path.join(directory, "three.json");
+  const definition = (tenant: string) =>
+    JSON.stringify({ mcpServers: { docs: { url: `https://example.com/mcp?tenant=${tenant}` } } });
+  await Promise.all([
+    fs.writeFile(first, definition("first")),
+    fs.writeFile(second, definition("second")),
+    fs.writeFile(third, definition("first")),
+  ]);
+  const result = await discoverMcpServers({
+    locations: [
+      { application: "chatgpt", path: first, format: "json", scope: "global" },
+      { application: "claude", path: second, format: "json", scope: "global" },
+      { application: "claude", path: third, format: "json", scope: "project", projectId: "three" },
+    ],
+  });
+  const one = result.mcpServers.find((server) => server.configurationFile === first);
+  const two = result.mcpServers.find((server) => server.configurationFile === second);
+  const three = result.mcpServers.find((server) => server.configurationFile === third);
+  assert.ok(one && two && three);
+  assert.equal(one.url, two.url);
+  assert.notEqual(one.endpointMatchId, two.endpointMatchId);
+  assert.equal(one.endpointMatchId, three.endpointMatchId);
+  assert.equal(JSON.stringify(result).includes("tenant=first"), false);
+});
+
 test("reports malformed configuration without throwing", async (t) => {
   const directory = await temporaryDirectory(t);
   const configurationFile = path.join(directory, ".mcp.json");
@@ -91,6 +158,27 @@ test("reports malformed configuration without throwing", async (t) => {
 
   assert.deepEqual(result.mcpServers, []);
   assert.equal(result.diagnostics[0]?.code, "MCP_CONFIG_INVALID");
+});
+
+test("isolates a deeply nested server instead of aborting the full scan", async (t) => {
+  const directory = await temporaryDirectory(t);
+  const configurationFile = path.join(directory, ".mcp.json");
+  const nested = "[".repeat(12_000) + "0" + "]".repeat(12_000);
+  await fs.writeFile(
+    configurationFile,
+    `{"mcpServers":{"deep":{"command":"node","custom":${nested}},"healthy":{"command":"node"}}}`,
+  );
+  const result = await scanMcpConfiguration({
+    application: "claude",
+    path: configurationFile,
+    format: "json",
+    scope: "global",
+  });
+  assert.deepEqual(
+    result.mcpServers.map((server) => server.name),
+    ["healthy"],
+  );
+  assert.equal(result.diagnostics[0]?.code, "MCP_SERVER_INVALID");
 });
 
 test("marks same-name servers in the same scope as duplicates", async (t) => {

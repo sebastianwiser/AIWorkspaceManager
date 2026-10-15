@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
 import { parseDocument } from "yaml";
+import { readRegularFilePrefix } from "./safe-file.js";
 import type { MetadataStatus, SkillMetadata } from "./types.js";
 
 // Skill instructions can be large, but useful frontmatter should remain small.
@@ -17,7 +17,7 @@ export async function readSkillMetadata(
   fallbackName: string,
 ): Promise<SkillMetadata> {
   try {
-    const contents = await fs.readFile(filePath);
+    const contents = await readRegularFilePrefix(filePath, MAX_FRONTMATTER_BYTES);
     return parseSkillMetadata(contents, fallbackName);
   } catch (error) {
     return createMetadataResult({

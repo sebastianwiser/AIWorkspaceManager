@@ -184,7 +184,12 @@ test("deduplicates identical Claude Desktop session snapshots", async (t) => {
   await fs.writeFile(path.join(secondCopy, "SKILL.md"), "# PDF\nSame contents\n");
 
   const result = await scanApplications({
-    applications: [createApplication("claude", root)],
+    applications: [
+      {
+        ...createApplication("claude", root),
+        locations: [{ label: "Desktop snapshots", path: root, source: "desktop-plugin" }],
+      },
+    ],
   });
 
   assert.equal(result.skills.length, 1);
@@ -206,4 +211,34 @@ test("keeps same-named skills when their contents differ", async (t) => {
   });
 
   assert.equal(result.skills.length, 2);
+});
+
+test("keeps identical plugin skills at different locations for ownership", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  for (const plugin of ["plugin-a", "plugin-b"]) {
+    const skillDirectory = path.join(root, plugin, "skills", "shared");
+    await fs.mkdir(skillDirectory, { recursive: true });
+    await fs.writeFile(path.join(skillDirectory, "SKILL.md"), "# Same content\n");
+  }
+  const result = await scanApplications({
+    applications: [
+      {
+        ...createApplication("chatgpt", root),
+        locations: [{ label: "Plugins", path: root, source: "plugin" }],
+      },
+    ],
+  });
+  assert.equal(result.skills.length, 2);
+});
+
+test("warns when an oversized skill cannot be fingerprinted", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const skillDirectory = path.join(root, "oversized");
+  await fs.mkdir(skillDirectory);
+  const instructionFile = path.join(skillDirectory, "SKILL.md");
+  await fs.writeFile(instructionFile, "# Oversized\n");
+  await fs.truncate(instructionFile, 17 * 1024 * 1024);
+  const result = await scanApplications({ applications: [createApplication("chatgpt", root)] });
+  assert.equal(result.skills.length, 1);
+  assert.equal(result.diagnostics[0]?.code, "READ_FAILED");
 });

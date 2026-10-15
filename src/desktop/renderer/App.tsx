@@ -35,6 +35,7 @@ import type {
   SortOrder,
 } from "../../types.js";
 import { AlertIcon, FolderIcon, MarkIcon, RefreshIcon, SearchIcon, ShieldIcon } from "./Icons.js";
+import { RelationshipPanel } from "./RelationshipPanel.js";
 
 type SourceFilter = SkillSourceId | "all";
 type StatusFilter = MetadataStatus | "all";
@@ -84,7 +85,7 @@ export function App() {
   const [isResettingBaseline, setIsResettingBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InventoryMode>("inventory");
-  const [inventoryKind, setInventoryKind] = useState<InventoryKind>("skills");
+  const [inventoryKind, setInventoryKind] = useState<InventoryKind | "relationships">("skills");
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [source, setSource] = useState<SourceFilter>("all");
@@ -278,6 +279,14 @@ export function App() {
           >
             Plugins
           </button>
+          <button
+            type="button"
+            className={inventoryKind === "relationships" ? "active" : ""}
+            aria-current={inventoryKind === "relationships" ? "page" : undefined}
+            onClick={() => setInventoryKind("relationships")}
+          >
+            Relationships
+          </button>
         </nav>
 
         <div className="titlebar-actions">
@@ -298,7 +307,14 @@ export function App() {
       </header>
 
       <main>
-        {inventoryKind === "mcp" ? (
+        {inventoryKind === "relationships" ? (
+          <RelationshipPanel
+            scanResult={scanResult}
+            isScanning={isScanning}
+            error={error}
+            onRetry={refreshInventory}
+          />
+        ) : inventoryKind === "mcp" ? (
           <McpInventoryPanel
             scanResult={scanResult}
             isScanning={isScanning}
@@ -346,6 +362,7 @@ export function App() {
               <ChangeSummary
                 changes={scanResult.changes.items}
                 baselineCreated={scanResult.changes.baselineCreated}
+                baselinePreserved={scanResult.changes.baselinePreserved ?? false}
                 baselineScannedAt={scanResult.changes.baselineScannedAt}
                 onViewChanges={() => setMode("changes")}
                 onReset={() => void resetBaseline()}
@@ -634,8 +651,7 @@ function PluginInventoryPanel({
           <p className="section-kicker">PLUGIN INVENTORY</p>
           <h2 id="plugin-heading">See the packages behind your capabilities.</h2>
           <p>
-            Review installed bundles and the skills, MCP servers, apps, and hooks they bring with
-            them.
+            Review local bundles and the skills, MCP servers, apps, and hooks they bring with them.
           </p>
         </div>
         {scanResult && (
@@ -647,7 +663,7 @@ function PluginInventoryPanel({
       </section>
 
       <section className="summary-strip" aria-label="Plugin inventory summary">
-        <SummaryMetric label="Installed plugins" value={plugins.length} tone="ink" />
+        <SummaryMetric label="Plugin bundles" value={plugins.length} tone="ink" />
         <SummaryMetric
           label="Included skills"
           value={plugins.reduce((total, plugin) => total + plugin.skills.length, 0)}
@@ -747,12 +763,12 @@ function PluginInventoryPanel({
         </div>
         <div className="inventory-meta">
           <span>
-            <strong>{filtered.length}</strong> of {plugins.length} installed plugins
+            <strong>{filtered.length}</strong> of {plugins.length} local plugin bundles
           </span>
           <span>Marketplace catalogs are excluded</span>
         </div>
         <div className="inventory-layout">
-          <div className="skill-list" aria-label="Installed plugins">
+          <div className="skill-list" aria-label="Plugin bundles">
             {isScanning && !scanResult ? (
               <LoadingList />
             ) : filtered.length > 0 ? (
@@ -766,9 +782,7 @@ function PluginInventoryPanel({
               ))
             ) : (
               <div className="empty-state">
-                <h3>
-                  {hasFilters ? "No plugins match these filters" : "No installed plugins found"}
-                </h3>
+                <h3>{hasFilters ? "No plugins match these filters" : "No plugin bundles found"}</h3>
                 <p>
                   {hasFilters
                     ? "Clear the filters to see the complete plugin inventory."
@@ -821,7 +835,8 @@ function PluginRow({
         </span>
         <span>{plugin.description ?? "No description provided"}</span>
         <span className="row-meta">
-          {plugin.applicationName} · {plugin.originName} · {componentCount}{" "}
+          {plugin.applicationName} · {plugin.originName} ·{" "}
+          {installationLabel(plugin.installationStatus)} · {componentCount}{" "}
           {componentCount === 1 ? "component" : "components"}
         </span>
       </span>
@@ -869,6 +884,10 @@ function PluginDetails({ plugin }: { plugin: DiscoveredPlugin }) {
         <div>
           <dt>Availability</dt>
           <dd>{plugin.projectName ? `Project: ${plugin.projectName}` : "Global"}</dd>
+        </div>
+        <div>
+          <dt>Installation evidence</dt>
+          <dd>{installationLabel(plugin.installationStatus)}</dd>
         </div>
         <div>
           <dt>Manifest</dt>
@@ -988,6 +1007,19 @@ function PluginComponentGroup({
 
 function PluginStatusPill({ status }: { status: PluginStatus }) {
   return <span className={`status-pill status-${status}`}>{capitalize(status)}</span>;
+}
+
+function installationLabel(status: DiscoveredPlugin["installationStatus"]): string {
+  switch (status) {
+    case "confirmed":
+      return "Confirmed install";
+    case "bundled":
+      return "App bundled";
+    case "cached":
+      return "Cached; install unverified";
+    case "unverified":
+      return "Install unverified";
+  }
 }
 
 function EmptyPluginDetails() {
@@ -1409,6 +1441,7 @@ function EmptyMcpDetails() {
 function ChangeSummary({
   changes,
   baselineCreated,
+  baselinePreserved,
   baselineScannedAt,
   onViewChanges,
   onReset,
@@ -1416,6 +1449,7 @@ function ChangeSummary({
 }: {
   changes: readonly SkillChange[];
   baselineCreated: boolean;
+  baselinePreserved: boolean;
   baselineScannedAt: string | null;
   onViewChanges: () => void;
   onReset: () => void;
@@ -1427,17 +1461,23 @@ function ChangeSummary({
     <section className="change-summary" aria-label="Changes since previous scan">
       <div className="change-summary-copy">
         <strong>
-          {baselineCreated ? "Change tracking is ready" : "Changes since your last scan"}
+          {baselinePreserved
+            ? "Change comparison paused"
+            : baselineCreated
+              ? "Change tracking is ready"
+              : "Changes since your last scan"}
         </strong>
         <span>
-          {baselineCreated
-            ? "This scan is the baseline. Future rescans will show what changed."
-            : baselineScannedAt
-              ? `Compared with ${formatDate(baselineScannedAt)}.`
-              : "Compared with the previous inventory."}
+          {baselinePreserved
+            ? "Some locations could not be fully scanned. Your previous baseline was kept; rescan to compare changes."
+            : baselineCreated
+              ? "This scan is the baseline. Future rescans will show what changed."
+              : baselineScannedAt
+                ? `Compared with ${formatDate(baselineScannedAt)}.`
+                : "Compared with the previous inventory."}
         </span>
       </div>
-      {!baselineCreated && (
+      {!baselineCreated && !baselinePreserved && (
         <div className="change-counts" aria-label={`${changes.length} total changes`}>
           <span className="change-added">+{counts.added} added</span>
           <span className="change-modified">{counts.modified} modified</span>
@@ -1446,7 +1486,7 @@ function ChangeSummary({
         </div>
       )}
       <div className="change-summary-actions">
-        {!baselineCreated && changes.length > 0 && (
+        {!baselineCreated && !baselinePreserved && changes.length > 0 && (
           <button type="button" className="view-changes-button" onClick={onViewChanges}>
             View changes
           </button>
@@ -1455,7 +1495,7 @@ function ChangeSummary({
           type="button"
           className="reset-baseline-button"
           onClick={onReset}
-          disabled={isResetting}
+          disabled={isResetting || baselinePreserved}
         >
           {isResetting ? "Resetting…" : "Reset baseline"}
         </button>

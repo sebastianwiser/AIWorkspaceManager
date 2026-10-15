@@ -1,23 +1,28 @@
 import { discoverMcpServers, type McpDiscoveryOptions } from "./mcp.js";
 import { attachPluginSkills, discoverPlugins, type PluginDiscoveryOptions } from "./plugins.js";
 import { scanApplications } from "./scanner.js";
-import type { ApplicationDefinition, ScanResult } from "./types.js";
+import type { KnownProject } from "./projects.js";
+import type { ApplicationDefinition, ScanDiagnostic, ScanResult } from "./types.js";
 
 /** Run the shared, read-only discovery used by both the CLI and desktop app. */
 export async function scanLocalInventory({
   applications,
   mcpOptions,
   pluginOptions,
+  projects,
+  initialDiagnostics = [],
 }: {
   applications: readonly ApplicationDefinition[];
   mcpOptions?: McpDiscoveryOptions;
   pluginOptions?: PluginDiscoveryOptions;
+  projects?: readonly KnownProject[];
+  initialDiagnostics?: readonly ScanDiagnostic[];
 }): Promise<ScanResult> {
   const applicationIds = new Set(applications.map((application) => application.id));
   const [skillResult, mcpResult, pluginResult] = await Promise.all([
     scanApplications({ applications: [...applications] }),
-    discoverMcpServers(mcpOptions),
-    discoverPlugins(pluginOptions),
+    discoverMcpServers({ projects, ...mcpOptions }),
+    discoverPlugins({ projects, ...pluginOptions }),
   ]);
 
   const plugins = attachPluginSkills(
@@ -30,6 +35,7 @@ export async function scanLocalInventory({
     mcpServers: mcpResult.mcpServers.filter((server) => applicationIds.has(server.application)),
     plugins,
     diagnostics: [
+      ...initialDiagnostics.filter((diagnostic) => applicationIds.has(diagnostic.application)),
       ...skillResult.diagnostics,
       ...mcpResult.diagnostics.filter((diagnostic) => applicationIds.has(diagnostic.application)),
       ...pluginResult.diagnostics.filter((diagnostic) =>

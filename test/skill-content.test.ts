@@ -40,3 +40,32 @@ test("rejects an invalid content limit", async (t) => {
 
   await assert.rejects(() => readSkillContent(instructionFile, 0), /positive integer/);
 });
+
+test("rejects a skill file replaced by a symlink after scanning", async (t) => {
+  const directory = await createTemporaryDirectory(t);
+  const instructionFile = path.join(directory, "SKILL.md");
+  const privateFile = path.join(directory, "private.txt");
+  await fs.writeFile(instructionFile, "# Public\n");
+  await fs.writeFile(privateFile, "private content");
+  const stats = await fs.lstat(instructionFile);
+  await fs.unlink(instructionFile);
+  await fs.symlink(privateFile, instructionFile);
+  await assert.rejects(
+    () => readSkillContent(instructionFile, undefined, { dev: stats.dev, ino: stats.ino }),
+    /regular file|symbolic link/,
+  );
+});
+
+test("rejects a different regular file after scanning", async (t) => {
+  const directory = await createTemporaryDirectory(t);
+  const instructionFile = path.join(directory, "SKILL.md");
+  const replacement = path.join(directory, "replacement.md");
+  await fs.writeFile(instructionFile, "# Original\n");
+  const stats = await fs.lstat(instructionFile);
+  await fs.writeFile(replacement, "# Replacement\n");
+  await fs.rename(replacement, instructionFile);
+  await assert.rejects(
+    () => readSkillContent(instructionFile, undefined, { dev: stats.dev, ino: stats.ino }),
+    /changed since the last scan/,
+  );
+});

@@ -20,14 +20,14 @@
     "scan": "tsx ./src/main.ts scan",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --project tsconfig.json",
-    "lint": "eslint src test",
+    "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run format:check",
     "prepack": "npm run build"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.13.0 || >=24.0.0"
   },
   "license": "MIT",
   "private": true,

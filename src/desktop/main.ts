@@ -1,16 +1,18 @@
 import path from "node:path";
+import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import electron from "electron";
-import { getScanApplications } from "../applications.js";
+import { getScanContext } from "../applications.js";
 import {
   compareInventorySnapshots,
   createInventorySnapshot,
+  isInventoryScanComplete,
   readInventorySnapshot,
   writeInventorySnapshot,
   type InventorySnapshot,
 } from "../changes.js";
 import { scanLocalInventory } from "../inventory-scan.js";
-import { readSkillContent } from "../skill-content.js";
+import { readSkillContent, type ExpectedFileIdentity } from "../skill-content.js";
 import type { DesktopScanResult, InventoryChanges, SkillContentResult } from "../types.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -19,21 +21,73 @@ const SCAN_CHANNEL = "inventory:scan";
 const READ_CONTENT_CHANNEL = "inventory:read-skill-content";
 const RESET_BASELINE_CHANNEL = "inventory:reset-baseline";
 
-let allowedInstructionFiles = new Set<string>();
+let allowedInstructionFiles = new Map<string, ExpectedFileIdentity>();
 let latestSnapshot: InventorySnapshot | null = null;
 
 function registerHandlers(): void {
   ipcMain.handle(SCAN_CHANNEL, async (): Promise<DesktopScanResult> => {
-    const result = await scanLocalInventory({ applications: await getScanApplications() });
+    const context = await getScanContext();
+    const result = await scanLocalInventory({
+      applications: context.applications,
+      projects: context.projects,
+      initialDiagnostics: context.diagnostics,
+    });
     const scannedAt = new Date().toISOString();
     const snapshot = await createInventorySnapshot(result.skills, scannedAt);
+    for (const entry of snapshot.skills) {
+      if (entry.fingerprint === null) {
+        result.diagnostics.push({
+          application: entry.skill.application,
+          location: entry.skill.instructionFile,
+          severity: "warning",
+          code: "READ_FAILED",
+          message: "A skill changed or could not be fingerprinted while the baseline was prepared.",
+        });
+      }
+    }
     const baselinePath = getBaselinePath();
     const previousSnapshot = await readInventorySnapshot(baselinePath);
-    const changes = compareInventorySnapshots(snapshot, previousSnapshot);
-    await writeInventorySnapshot(baselinePath, snapshot);
+    const complete = isInventoryScanComplete(
+      previousSnapshot,
+      context.applications,
+      result.diagnostics,
+    );
+    const changes = complete
+      ? compareInventorySnapshots(snapshot, previousSnapshot)
+      : {
+          baselineCreated: false,
+          baselinePreserved: true,
+          baselineScannedAt: previousSnapshot?.scannedAt ?? null,
+          comparedAt: scannedAt,
+          items: [],
+        };
+    if (complete) {
+      await writeInventorySnapshot(baselinePath, snapshot);
+    } else {
+      result.diagnostics.push({
+        application: "chatgpt",
+        location: baselinePath,
+        severity: "warning",
+        code: "BASELINE_PRESERVED",
+        message:
+          "The scan was incomplete. The previous baseline was kept; removals were not assessed.",
+      });
+    }
 
-    latestSnapshot = snapshot;
-    allowedInstructionFiles = new Set(result.skills.map((skill) => skill.instructionFile));
+    latestSnapshot = complete ? snapshot : null;
+    const fileIdentities = await Promise.all(
+      result.skills.map(async (skill) => {
+        try {
+          const stats = await fs.lstat(skill.instructionFile);
+          return stats.isFile() && !stats.isSymbolicLink()
+            ? ([skill.instructionFile, { dev: stats.dev, ino: stats.ino }] as const)
+            : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    allowedInstructionFiles = new Map(fileIdentities.filter((entry) => entry !== null));
 
     return {
       ...result,
@@ -44,7 +98,7 @@ function registerHandlers(): void {
 
   ipcMain.handle(RESET_BASELINE_CHANNEL, async (): Promise<InventoryChanges> => {
     if (!latestSnapshot) {
-      throw new Error("Scan the inventory before resetting its baseline.");
+      throw new Error("Complete a full inventory scan before resetting its baseline.");
     }
 
     await writeInventorySnapshot(getBaselinePath(), latestSnapshot);
@@ -56,12 +110,14 @@ function registerHandlers(): void {
     async (_event, instructionFile: unknown): Promise<SkillContentResult> => {
       // The renderer may only read an exact SKILL.md path produced by the most
       // recent scan. It cannot use this channel as a general file reader.
-      if (typeof instructionFile !== "string" || !allowedInstructionFiles.has(instructionFile)) {
+      const identity =
+        typeof instructionFile === "string" ? allowedInstructionFiles.get(instructionFile) : null;
+      if (typeof instructionFile !== "string" || !identity) {
         return { ok: false, error: "That skill is not part of the current inventory." };
       }
 
       try {
-        const result = await readSkillContent(instructionFile);
+        const result = await readSkillContent(instructionFile, undefined, identity);
         return { ok: true, ...result };
       } catch (error) {
         return {

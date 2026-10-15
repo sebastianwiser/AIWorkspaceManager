@@ -3,7 +3,21 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { discoverProjectSkillLocations } from "../src/projects.js";
+import { discoverKnownProjectsDetailed, discoverProjectSkillLocations } from "../src/projects.js";
+
+test("reports a malformed project registry without exposing its contents", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "skillmanager-project-state-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const codexStateFile = path.join(root, "codex.json");
+  await fs.writeFile(codexStateFile, '{"token": sample-private-secret}');
+  const result = await discoverKnownProjectsDetailed({
+    codexStateFile,
+    claudeStateFile: path.join(root, "missing.json"),
+    claudeSpacesFiles: [],
+  });
+  assert.equal(result.diagnostics[0]?.code, "PROJECT_REGISTRY_INVALID");
+  assert.doesNotMatch(JSON.stringify(result), /sample-private-secret/);
+});
 
 async function createTemporaryDirectory(t: TestContext): Promise<string> {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "skillmanager-project-test-"));

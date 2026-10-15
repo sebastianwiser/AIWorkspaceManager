@@ -1,7 +1,16 @@
 import path from "node:path";
 import os from "node:os";
-import type { ApplicationDefinition, ApplicationId, ScanLocationDefinition } from "./types.js";
-import { discoverProjectSkillLocations } from "./projects.js";
+import type {
+  ApplicationDefinition,
+  ApplicationId,
+  ScanDiagnostic,
+  ScanLocationDefinition,
+} from "./types.js";
+import {
+  discoverKnownProjectsDetailed,
+  findProjectSkillLocations,
+  type KnownProject,
+} from "./projects.js";
 
 /**
  * Applications supported by the first version of SkillManagerOS.
@@ -81,16 +90,29 @@ export function getApplications(): ApplicationDefinition[] {
 
 /** Return default locations plus project-local skill folders known to either app. */
 export async function getScanApplications(): Promise<ApplicationDefinition[]> {
+  return (await getScanContext()).applications;
+}
+
+export async function getScanContext(): Promise<{
+  applications: ApplicationDefinition[];
+  projects: KnownProject[];
+  diagnostics: ScanDiagnostic[];
+}> {
   const applications = getApplications().map((application) => ({
     ...application,
     locations: [...application.locations],
   }));
-  const projectLocations = await discoverProjectSkillLocations();
+  const projectResult = await discoverKnownProjectsDetailed();
+  const projectLocations = await findProjectSkillLocations(projectResult.projects);
 
   for (const item of projectLocations) {
     const application = applications.find((candidate) => candidate.id === item.application);
     application?.locations.push(item.location);
   }
 
-  return applications;
+  return {
+    applications,
+    projects: projectResult.projects,
+    diagnostics: projectResult.diagnostics,
+  };
 }

@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { ApplicationId, ScanLocationDefinition } from "./types.js";
+import { readRegularFileBounded } from "./safe-file.js";
+import type { ApplicationId, ScanDiagnostic, ScanLocationDefinition } from "./types.js";
 
 const PROJECT_SEARCH_DEPTH = 4;
+const MAX_REGISTRY_BYTES = 8 * 1024 * 1024;
 const IGNORED_PROJECT_FOLDERS = new Set([
   ".git",
   "node_modules",
@@ -20,6 +22,11 @@ export interface KnownProject {
   id: string;
   name: string;
   path: string;
+}
+
+export interface ProjectDiscoveryResult {
+  projects: KnownProject[];
+  diagnostics: ScanDiagnostic[];
 }
 
 export interface ProjectDiscoveryOptions {
@@ -41,6 +48,13 @@ export async function discoverProjectSkillLocations(
   options: ProjectDiscoveryOptions = {},
 ): Promise<LocatedProjectSkills[]> {
   const roots = await discoverKnownProjects(options);
+  return findProjectSkillLocations(roots);
+}
+
+/** Locate skill folders for an already-read project registry. */
+export async function findProjectSkillLocations(
+  roots: readonly KnownProject[],
+): Promise<LocatedProjectSkills[]> {
   const locations = new Map<string, LocatedProjectSkills>();
 
   for (const root of roots) {
@@ -56,6 +70,13 @@ export async function discoverProjectSkillLocations(
 export async function discoverKnownProjects(
   options: ProjectDiscoveryOptions = {},
 ): Promise<KnownProject[]> {
+  return (await discoverKnownProjectsDetailed(options)).projects;
+}
+
+/** Read project registries and retain failures that could make a scan incomplete. */
+export async function discoverKnownProjectsDetailed(
+  options: ProjectDiscoveryOptions = {},
+): Promise<ProjectDiscoveryResult> {
   const home = os.homedir();
   const claudeSpacesFiles =
     options.claudeSpacesFiles ??
@@ -74,9 +95,12 @@ async function readProjectRoots(
   codexStateFile: string,
   claudeStateFile: string,
   claudeSpacesFiles: readonly string[],
-): Promise<KnownProject[]> {
+): Promise<ProjectDiscoveryResult> {
   const roots = new Map<string, KnownProject>();
-  const codexState = await readJsonObject(codexStateFile);
+  const diagnostics: ScanDiagnostic[] = [];
+  const codexResult = await readJsonObject(codexStateFile, "chatgpt");
+  diagnostics.push(...codexResult.diagnostics);
+  const codexState = codexResult.document;
   const localProjects = asObject(codexState?.["local-projects"]);
 
   for (const [projectId, value] of Object.entries(localProjects ?? {})) {
@@ -90,7 +114,9 @@ async function readProjectRoots(
     }
   }
 
-  const claudeState = await readJsonObject(claudeStateFile);
+  const claudeResult = await readJsonObject(claudeStateFile, "claude");
+  diagnostics.push(...claudeResult.diagnostics);
+  const claudeState = claudeResult.document;
   const claudeProjects = asObject(claudeState?.projects);
   for (const rootPath of Object.keys(claudeProjects ?? {})) {
     addProjectRoot(roots, "claude", rootPath, `claude:${path.resolve(rootPath)}`, null);
@@ -100,7 +126,9 @@ async function readProjectRoots(
   // IDs are more useful than the folder-only entries in ~/.claude.json, so
   // apply them after reading the general Claude directory registry.
   for (const spacesFile of claudeSpacesFiles) {
-    const spacesState = await readJsonObject(spacesFile);
+    const spacesResult = await readJsonObject(spacesFile, "claude");
+    diagnostics.push(...spacesResult.diagnostics);
+    const spacesState = spacesResult.document;
     const spaces = Array.isArray(spacesState?.spaces) ? spacesState.spaces : [];
 
     for (const value of spaces) {
@@ -121,7 +149,7 @@ async function readProjectRoots(
     }
   }
 
-  return [...roots.values()];
+  return { projects: [...roots.values()], diagnostics };
 }
 
 function addProjectRoot(
@@ -277,15 +305,39 @@ async function isRealDirectory(directory: string): Promise<boolean> {
   }
 }
 
-async function readJsonObject(filePath: string): Promise<Record<string, unknown> | null> {
+async function readJsonObject(
+  filePath: string,
+  application: ApplicationId,
+): Promise<{ document: Record<string, unknown> | null; diagnostics: ScanDiagnostic[] }> {
   try {
-    const contents = await fs.readFile(filePath, "utf8");
-    return asObject(JSON.parse(contents));
-  } catch {
-    // A missing, unreadable, or partially-written application state file only
-    // means that application's project roots cannot be discovered this scan.
-    return null;
+    const stats = await fs.lstat(filePath);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_REGISTRY_BYTES) {
+      throw new Error("invalid registry file");
+    }
+    const contents = (await readRegularFileBounded(filePath, MAX_REGISTRY_BYTES)).toString("utf8");
+    const document = asObject(JSON.parse(contents));
+    if (!document) throw new Error("invalid registry format");
+    return { document, diagnostics: [] };
+  } catch (error) {
+    if (getNodeErrorCode(error) === "ENOENT") return { document: null, diagnostics: [] };
+    return {
+      document: null,
+      diagnostics: [
+        {
+          application,
+          location: filePath,
+          severity: "warning",
+          code: "PROJECT_REGISTRY_INVALID",
+          message:
+            "A project registry could not be read safely; project inventory may be incomplete.",
+        },
+      ],
+    };
   }
+}
+
+function getNodeErrorCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error ? String(error.code) : null;
 }
 
 function asObject(value: unknown): Record<string, unknown> | null {

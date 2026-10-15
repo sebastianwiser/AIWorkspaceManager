@@ -48,6 +48,7 @@ function server(overrides: Partial<DiscoveredMcpServer> = {}): DiscoveredMcpServ
     configurationFile: "/config.toml",
     configurationFormat: "toml",
     safeConfiguration: "",
+    endpointMatchId: null,
     status: "valid",
     issues: [],
     ...overrides,
@@ -108,8 +109,13 @@ test("keeps multiple definitions of one local file inside a single variant", () 
 
 test("groups same-name MCP definitions and explains endpoint evidence", () => {
   const exact = createMcpCapabilityGroups([
-    server(),
-    server({ application: "claude", applicationName: "Claude", configurationFile: "/mcp.json" }),
+    server({ endpointMatchId: "exact-local-endpoint" }),
+    server({
+      application: "claude",
+      applicationName: "Claude",
+      configurationFile: "/mcp.json",
+      endpointMatchId: "exact-local-endpoint",
+    }),
   ])[0];
   const candidate = createMcpCapabilityGroups([
     server(),
@@ -118,9 +124,23 @@ test("groups same-name MCP definitions and explains endpoint evidence", () => {
       applicationName: "Claude",
       url: "https://other.example.com/mcp",
       configurationFile: "/mcp.json",
+      endpointMatchId: "different-local-endpoint",
     }),
   ])[0];
 
   assert.equal(exact.matchBasis, "shared-endpoint");
   assert.equal(candidate.matchBasis, "matching-name");
+});
+
+test("does not infer one endpoint from identical redacted URLs", () => {
+  const [group] = createMcpCapabilityGroups([
+    server({ url: "https://example.com/[REDACTED PATH]", endpointMatchId: "first" }),
+    server({
+      application: "claude",
+      applicationName: "Claude",
+      url: "https://example.com/[REDACTED PATH]",
+      endpointMatchId: "second",
+    }),
+  ]);
+  assert.equal(group.matchBasis, "matching-name");
 });

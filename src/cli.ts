@@ -1,6 +1,6 @@
 import process from "node:process";
 import readline from "node:readline/promises";
-import { getApplications, getScanApplications } from "./applications.js";
+import { getApplications, getScanContext } from "./applications.js";
 import {
   createInventoryView,
   createMcpInventoryView,
@@ -100,10 +100,15 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     ? expandApplicationChoice(options.application)
     : await promptForApplications(io);
 
-  const applications = (await getScanApplications()).filter((application) =>
+  const context = await getScanContext();
+  const applications = context.applications.filter((application) =>
     applicationIds.includes(application.id),
   );
-  const scanResult = await scanLocalInventory({ applications });
+  const scanResult = await scanLocalInventory({
+    applications,
+    projects: context.projects,
+    initialDiagnostics: context.diagnostics,
+  });
   const result: ScanResult = {
     ...scanResult,
     skills: createInventoryView(scanResult.skills, {
@@ -306,15 +311,15 @@ function printPluginResult(
   totalCount: number,
   io: CliIo,
 ): void {
-  io.write(`\nScanned local ${names} plugin installations.\n`);
+  io.write(`\nScanned local ${names} plugin bundles.\n`);
   if (plugins.length === 0) {
     io.write(
       options.search && totalCount > 0
         ? "\nNo plugins matched the current filters.\n"
-        : "\nNo installed plugins were found.\n",
+        : "\nNo plugin bundles were found.\n",
     );
   } else {
-    io.write(`\nFound ${plugins.length} installed plugin${plugins.length === 1 ? "" : "s"}:\n\n`);
+    io.write(`\nFound ${plugins.length} plugin bundle${plugins.length === 1 ? "" : "s"}:\n\n`);
     for (const application of ["chatgpt", "claude"] as const) {
       const applicationPlugins = plugins.filter((plugin) => plugin.application === application);
       if (applicationPlugins.length === 0) continue;
@@ -324,6 +329,7 @@ function printPluginResult(
         io.write(`  ${sanitizeSingleLine(plugin.displayName)}${version} [${plugin.status}]\n`);
         if (options.details) {
           io.write(`    Source: ${sanitizeSingleLine(plugin.originName)}\n`);
+          io.write(`    Installation evidence: ${plugin.installationStatus}\n`);
           io.write(`    Skills: ${plugin.skills.length}\n`);
           io.write(`    MCP servers: ${plugin.mcpServers.length}\n`);
           io.write(`    Location: ${sanitizeSingleLine(shortenHomePath(plugin.directory))}\n`);

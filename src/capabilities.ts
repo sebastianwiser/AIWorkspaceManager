@@ -103,12 +103,8 @@ function getSkillMatchBasis(definitions: readonly DiscoveredSkill[]): Capability
 
 function getMcpMatchBasis(definitions: readonly DiscoveredMcpServer[]): CapabilityMatchBasis {
   if (uniqueApplications(definitions).length < 2) return "single-application";
-  const endpoints = new Set(
-    definitions.map((definition) =>
-      definition.command
-        ? `stdio:${definition.command}\u0000${definition.arguments.join("\u0000")}`
-        : `${definition.transport}:${definition.url ?? ""}`,
-    ),
-  );
-  return endpoints.size === 1 ? "shared-endpoint" : "matching-name";
+  const endpoints = definitions.map((definition) => definition.endpointMatchId);
+  return endpoints.every((endpoint) => endpoint !== null && endpoint === endpoints[0])
+    ? "shared-endpoint"
+    : "matching-name";
 }

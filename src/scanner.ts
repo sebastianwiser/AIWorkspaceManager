@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
 import { readSkillMetadata } from "./metadata.js";
+import { hashRegularFile } from "./safe-file.js";
 import type {
   ApplicationDefinition,
   ApplicationId,
@@ -18,6 +18,7 @@ import type {
 
 const SKILL_FILENAME = "SKILL.md";
 const DEFAULT_MAX_DEPTH = 10;
+const MAX_FINGERPRINT_BYTES = 16 * 1024 * 1024;
 
 // These folders can be very large and cannot contain a skill definition that
 // belongs to the parent package. Skipping them makes scans faster and safer.
@@ -57,12 +58,12 @@ export async function scanApplications({
       diagnostics.push(...result.diagnostics);
 
       for (const skill of result.skills) {
-        // Claude Desktop can keep identical copies of a skill for multiple
-        // sessions. Name + content identifies exact mirrors without merging two
-        // different skills that happen to use the same folder name.
-        const identity = skill.contentFingerprint
-          ? `${skill.application}:${skill.scope}:${skill.projectRoot ?? "global"}:${skill.name}:${skill.contentFingerprint}`
-          : `${skill.application}:${skill.instructionFile}`;
+        // Only Claude Desktop session snapshots are content-mirrors. Other
+        // identical files retain their own location and plugin provenance.
+        const identity =
+          location.source === "desktop-plugin" && skill.contentFingerprint
+            ? `${skill.application}:${skill.scope}:${skill.projectRoot ?? "global"}:${skill.name}:${skill.contentFingerprint}`
+            : `${skill.application}:${skill.instructionFile}`;
 
         if (!seenSkills.has(identity)) {
           seenSkills.add(identity);
@@ -178,6 +179,16 @@ async function walkDirectory({
     const folderName = path.basename(currentPath);
     const stats = await safeStat(instructionFile);
     const contentFingerprint = await createFileFingerprint(instructionFile);
+    if (!contentFingerprint) {
+      diagnostics.push({
+        application: application.id,
+        location: instructionFile,
+        severity: "warning",
+        code: "READ_FAILED",
+        message:
+          "This skill could not be fingerprinted within the 16 MB safety limit; change tracking may be incomplete.",
+      });
+    }
     const metadata = await readSkillMetadata(instructionFile, folderName);
     const source = classifySkillSource(application.id, location.source, currentPath);
 
@@ -252,8 +263,7 @@ async function safeStat(filePath: string): Promise<Stats | null> {
 
 async function createFileFingerprint(filePath: string): Promise<string | null> {
   try {
-    const contents = await fs.readFile(filePath);
-    return createHash("sha256").update(contents).digest("hex");
+    return await hashRegularFile(filePath, MAX_FINGERPRINT_BYTES);
   } catch {
     // If a file disappears or becomes unreadable, path-based identity is still
     // enough to report the discovered marker without stopping the whole scan.

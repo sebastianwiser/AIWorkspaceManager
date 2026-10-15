@@ -28,6 +28,8 @@ export type DiagnosticCode =
   | "SYMLINK_ROOT_SKIPPED"
   | "NOT_A_DIRECTORY"
   | "MAX_DEPTH_REACHED"
+  | "PROJECT_REGISTRY_INVALID"
+  | "BASELINE_PRESERVED"
   | "MCP_CONFIG_INVALID"
   | "MCP_SERVER_INVALID"
   | "MCP_SERVER_DUPLICATE"
@@ -112,6 +114,8 @@ export interface DiscoveredMcpServer {
   configurationFile: string;
   configurationFormat: McpConfigurationFormat;
   safeConfiguration: string;
+  /** Opaque, scan-local identity for an exact unredacted endpoint. Never contains configuration. */
+  endpointMatchId: string | null;
   status: McpStatus;
   issues: string[];
 }
@@ -143,6 +147,7 @@ export interface DiscoveredPlugin {
   projectRoot: string | null;
   origin: PluginOrigin;
   originName: string;
+  installationStatus: "confirmed" | "cached" | "bundled" | "unverified";
   directory: string;
   manifestFile: string;
   manifestFormat: PluginManifestFormat;
@@ -198,6 +203,7 @@ export interface SkillChange {
 
 export interface InventoryChanges {
   baselineCreated: boolean;
+  baselinePreserved?: boolean;
   baselineScannedAt: string | null;
   comparedAt: string;
   items: SkillChange[];

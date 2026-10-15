@@ -1,14 +1,16 @@
 # SkillManagerOS
 
+[![CI](https://github.com/sebastianwiser/AIWorkspaceManager/actions/workflows/ci.yml/badge.svg)](https://github.com/sebastianwiser/AIWorkspaceManager/actions/workflows/ci.yml)
+
 SkillManagerOS is an early, local-first desktop and command-line tool for discovering AI skills,
-plugins, and MCP server configurations installed for ChatGPT and Claude.
+plugin bundles, and MCP server configurations in local ChatGPT and Claude setups.
 
 This repository currently includes **MVP 1A: local skill discovery**, **MVP 1B: safe metadata
-parsing**, **MVP 1C: inventory**, **MVP 1D: change detection**, **MVP 2A: local MCP discovery**, and
-**MVP 2C: plugin inventory**. The program finds folders containing `SKILL.md`, reads declarative
-skill and plugin metadata, and inventories local MCP configuration without starting a server or
-exposing configured secret values. It does not execute, install, modify, or remove any discovered
-item.
+parsing**, **MVP 1C: inventory**, **MVP 1D: change detection**, **MVP 2A: local MCP discovery**,
+**MVP 2C: plugin inventory**, and **MVP 2D: relationships**. The program finds folders containing
+`SKILL.md`, reads declarative skill and plugin metadata, and inventories local MCP configuration
+without starting a server while redacting private configuration values. It does not execute,
+install, modify, or remove any discovered item.
 
 ## Project goals
 
@@ -59,20 +61,23 @@ The current version answers three questions:
 - Discover global and known-project MCP configuration for Codex, Claude Code, and Claude Desktop.
 - Parse stdio, HTTP, and SSE definitions without starting or contacting a server.
 - Show MCP names, applications, scope, transports, safe commands and URLs, and configuration paths.
-- Redact environment values, header values, URL credentials and query values, and common
-  command-line secret forms before display.
+- Redact unknown configuration values by default, including URL paths, queries, fragments,
+  credentials, and command arguments that cannot be shown safely.
 - Identify invalid and same-scope duplicate MCP server definitions.
 - Search and filter MCP servers by application and project.
 - Inspect a formatted, sanitized configuration excerpt in the desktop interface.
 - Group same-named skills and MCP configurations into explainable cross-app capability candidates.
 - Distinguish strong local evidence (a shared file or endpoint) from a name-only match that needs
   review.
-- Discover installed, synced, bundled, and skills-directory plugins without treating marketplace
-  catalogs as installations.
+- Discover confirmed Claude installations, app-bundled plugins, and local plugin bundles while
+  labeling Codex cache entries as cached rather than confirmed installations.
 - Parse portable, Codex, and Claude plugin manifests using bounded, read-only file access.
 - Search and filter plugins by application, project, and manifest status.
 - Show plugin version, publisher, source, scope, provenance, and local manifest location.
 - Connect each plugin to its discovered skills and packaged MCP servers, apps, and hooks.
+- Explore an application → global/project → plugin → skill/MCP relationship map in the desktop app.
+- Inspect cross-app capability links with explicit shared-file, shared-endpoint, or name-only
+  evidence.
 
 ## What it does not do yet
 
@@ -84,7 +89,7 @@ The current version answers three questions:
 
 ## Requirements
 
-- Node.js 20 or newer.
+- Node.js 22.13 or newer in the 22.x line, or Node.js 24 or newer.
 - macOS for the initial tested version.
 
 The scanner is written with cross-platform Node.js APIs, but Windows and Linux default locations
@@ -101,7 +106,7 @@ node --version
 Install the project dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
 Launch the desktop interface:
@@ -196,10 +201,12 @@ classification, metadata status, location, and modification time. JSON preserves
 for same-named variants.
 
 MCP records contain only sanitized commands, arguments, URLs, and configuration excerpts. Literal
-environment and header values are never included.
+environment and header values are never included; exact endpoint comparisons use random, scan-local
+equality labels rather than exposing the private definitions.
 
-Plugin records contain manifest metadata, installation provenance, and references to included
-components. Marketplace listings that are not installed are intentionally omitted.
+Plugin records contain sanitized manifest provenance, installation evidence, and references to
+included components. Codex cache entries are explicitly marked as unverified installations;
+marketplace catalog listings are omitted.
 
 ## Cross-app identity
 
@@ -215,12 +222,18 @@ local file, the detail panel provides a variant switch and shows which applicati
 and file belong to the selected variant. A read-only comparison view highlights added and removed
 lines between variants while collapsing long unchanged sections.
 
+The **Relationships** view shows the local application, location, and plugin path to each discovered
+skill or configured MCP server. Plugin-packaged MCP declarations are labeled separately unless the
+same application, scope, name, and configuration file are also found in the configured MCP
+inventory. This map describes what the local scan observed; it does not verify that a server can
+start or that two name-only matches are equivalent.
+
 ## MCP inventory
 
-Use the **Skills | MCP Servers | Plugins** switch in the desktop app, or `--kind mcp` in the CLI.
-MCP servers can be searched and filtered by application and project. The detail view shows the
-inferred transport, safe endpoint summary, declared environment-variable and header names,
-configuration location, validation notes, and a sanitized source excerpt.
+Use the **Skills | MCP Servers | Plugins | Relationships** switch in the desktop app, or
+`--kind mcp` in the CLI. MCP servers can be searched and filtered by application and project. The
+detail view shows the inferred transport, safe endpoint summary, declared environment-variable and
+header names, configuration location, validation notes, and a sanitized source excerpt.
 
 The read-only MCP scan checks these local configuration sources when present:
 
@@ -240,14 +253,14 @@ starts a command, opens a connection, checks reachability, or modifies configura
 
 Use the **Plugins** view in the desktop app, or `--kind plugins` in the CLI. The inventory
 recognizes portable root `plugin.json` manifests plus the `.codex-plugin/plugin.json` and
-`.claude-plugin/plugin.json` compatibility formats. It reads installed Codex bundles, Claude install
+`.claude-plugin/plugin.json` compatibility formats. It reads cached Codex bundles, Claude install
 records, Claude synced plugins, and plugin manifests loaded from Claude skills directories.
 
-The detail view shows the installed version, publisher, source, scope, manifest format, provenance,
-and the skills, packaged MCP servers, apps, and hooks found inside the bundle. Discovery never loads
-plugin code or runs a hook, command, or MCP server. Claude marketplace repositories are catalogs;
-their entries appear only when an install record or synced bundle proves that the plugin is locally
-installed.
+The detail view shows the declared version, publisher, source, scope, installation evidence,
+manifest format, provenance, and the skills, packaged MCP servers, apps, and hooks found inside the
+bundle. Discovery never loads plugin code or runs a hook, command, or MCP server. Claude marketplace
+repositories are catalogs; their entries appear only when an install record or synced bundle proves
+that the plugin is locally installed.
 
 ## Inventory filters
 
@@ -365,7 +378,8 @@ The scanner follows this process:
 6. Stop descending into that skill because nested folders are supporting files.
 7. Parse the bounded YAML frontmatter for a declared name and description.
 8. Fall back to the folder name when metadata is missing or invalid.
-9. Hash `SKILL.md` in memory to collapse identical session snapshots within the same scope.
+9. Hash bounded `SKILL.md` files to collapse only identical Claude Desktop session snapshots within
+   the same scope; keep separate plugin files distinct for ownership.
 10. Record whether the definition is global or belongs to a specific project.
 11. Classify the local source and return results with scan diagnostics.
 12. Inspect bounded plugin manifests and connect their packaged components to the owning plugin.
@@ -386,71 +400,42 @@ Discovered files must be treated as untrusted input. This version follows these 
 - Strip terminal control sequences from human-readable output.
 - Use skill contents only to create a local fingerprint for exact deduplication.
 - Save only one-way content hashes in the local baseline, never the skill contents themselves.
+- Preserve the previous baseline and pause change comparison if a scan is incomplete.
 - Never follow symbolic links.
 - Never scan the entire home directory.
 - Skip `.git`, `node_modules`, build output, and similar directories.
 - Stop recursively scanning below a fixed maximum depth.
 - Continue when an optional location is missing or unreadable.
 - Do not send scan results over the network.
-- Redact literal environment values, header values, URL credentials and query values, and common
-  command-line secret forms before MCP configuration leaves the trusted scan layer.
+- Redact unrecognized MCP values, URL paths and credentials, and unsafe command arguments before
+  configuration leaves the trusted scan layer.
 - Keep filesystem access in Electron's main process.
 - Expose only narrow inventory, content-preview, and baseline-reset functions to the desktop
   interface.
 - Disable renderer Node.js access, new windows, and web navigation.
 
-## Project structure
+## Architecture
 
 ```text
-SkillManagerOS/
-├── bin/
-│   └── skillmanager.js       Small wrapper for compiled JavaScript
-├── src/
-│   ├── applications.ts       Supported apps and default locations
-│   ├── changes.ts            Local snapshots and change comparison
-│   ├── cli.ts                Arguments, interactive menu, and output
-│   ├── desktop/
-│   │   ├── main.ts           Secure Electron main process
-│   │   ├── preload.cts       Narrow read-only desktop bridge
-│   │   └── renderer/         React inventory interface and styles
-│   ├── inventory-scan.ts     Shared skill and MCP scan orchestration
-│   ├── inventory.ts          Reusable searching, filtering, and sorting
-│   ├── main.ts               Development command-line entry point
-│   ├── mcp.ts                Secret-safe MCP configuration discovery
-│   ├── metadata.ts           Bounded YAML frontmatter parsing
-│   ├── projects.ts           Safe project registry and skill-folder discovery
-│   ├── scanner.ts            Read-only filesystem discovery
-│   └── types.ts              Shared domain types
-├── test/
-│   ├── cli.test.ts           Command argument tests
-│   ├── changes.test.ts       Snapshot and change-detection tests
-│   ├── inventory.test.ts     Inventory filtering and sorting tests
-│   ├── mcp.test.ts           MCP parsing, validation, duplicate, and redaction tests
-│   ├── metadata.test.ts      Metadata parsing and edge-case tests
-│   ├── projects.test.ts      Project discovery and boundary tests
-│   └── scanner.test.ts       Scanner behavior and safety tests
-├── eslint.config.js          ESLint configuration
-├── package-lock.json         Reproducible dependency versions
-├── package.json
-├── tsconfig.json             Strict development type checking
-├── tsconfig.build.json       Production JavaScript build
-├── vite.config.ts            Desktop renderer build
-└── README.md
+CLI ──────────────┐
+                  ├── shared TypeScript discovery + inventory ── bounded local files
+Electron main ────┘                 │
+      │                       capabilities + relationships
+      └── narrow preload API ── React desktop view
 ```
 
-Keeping these responsibilities separate makes the code easier to learn:
+Both interfaces use the same scan pipeline in `src/inventory-scan.ts`. Source adapters in
+`applications.ts`, `projects.ts`, `scanner.ts`, `mcp.ts`, and `plugins.ts` read only known
+locations; `safe-file.ts` enforces bounded, no-follow reads. Pure modules in `inventory.ts`,
+`capabilities.ts`, and `relationships.ts` turn those records into searchable views without claiming
+that same-named items are identical. `changes.ts` stores a local, metadata-only comparison baseline.
+The Electron main process owns filesystem access, while the React renderer receives only the narrow
+preload API.
 
-- `applications.ts` answers **where should we look?**
-- `changes.ts` answers **what changed since the previous desktop scan?**
-- `inventory.ts` answers **which discovered skills should this view show?**
-- `inventory-scan.ts` combines the read-only skill and MCP discovery results.
-- `mcp.ts` answers **which local MCP servers are configured, without exposing secret values?**
-- `metadata.ts` answers **what safe metadata does the skill declare?**
-- `projects.ts` answers **which known projects contain local skill folders?**
-- `scanner.ts` answers **what skill markers are present?**
-- `cli.ts` answers **what did the user request and how should results appear?**
-- `types.ts` defines the records shared by those modules.
-- `desktop/` presents the same inventory through a secure local window.
+Tests in `test/` cover parsing, identity, redaction, filesystem boundaries, change detection, and
+the relationship view. The
+[audit and management decision](docs/decisions/0001-audit-and-management-architecture.md) defines
+the safety boundaries for the next pillars.
 
 ## Development
 
@@ -465,6 +450,10 @@ Run strict type checking, linting, and a formatting check:
 ```bash
 npm run check
 ```
+
+GitHub Actions runs the tests, checks, and production build on both macOS and Ubuntu for every push
+and pull request. Desktop discovery is initially supported on macOS; the Ubuntu job guards the
+shared TypeScript core and build portability.
 
 Create the production CLI, Electron processes, and React interface in the ignored `dist/` directory:
 
@@ -506,10 +495,15 @@ The shared scanner will include it automatically.
    desktop/CLI inventory views.
 6. **Cross-app identity foundation:** capability candidates now connect app-specific skill and MCP
    records with explicit match evidence.
-7. **MVP 2C — Plugin inventory:** complete with installed-state-aware discovery, component
+7. **MVP 2C — Plugin inventory:** complete with installation-evidence labels, component
    relationships, filtering, and desktop/CLI inventory views.
-8. **Later pillars:** MCP status, full relationship views, auditing, portability, and safe
-   management.
+8. **MVP 2D — Relationships:** read-only application/project/plugin/component map with cross-app
+   evidence and explicit packaged-versus-configured MCP distinction.
+9. **Later pillars:** explicit MCP status checks, auditing, portability, and safe management.
+
+The [audit and management architecture](docs/decisions/0001-audit-and-management-architecture.md)
+sets the safety boundaries and delivery gates for Pillars 3 and 4. Those features are not yet
+implemented.
 
 ## Contributing principles
 

@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 import {
   compareInventorySnapshots,
   createInventorySnapshot,
+  isInventoryScanComplete,
   readInventorySnapshot,
   writeInventorySnapshot,
   type InventorySnapshot,
@@ -140,10 +141,93 @@ test("creates content hashes and persists a valid snapshot", async (t) => {
   assert.deepEqual(await readInventorySnapshot(snapshotFile), snapshot);
 });
 
+test("does not read past the fingerprint size ceiling", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const instructionFile = path.join(root, "SKILL.md");
+  await fs.writeFile(instructionFile, "# Large\n");
+  await fs.truncate(instructionFile, 17 * 1024 * 1024);
+  const snapshot = await createInventorySnapshot(
+    [createSkill(instructionFile)],
+    "2026-01-01T00:00:00.000Z",
+  );
+  assert.equal(snapshot.skills[0].fingerprint, null);
+});
+
 test("ignores an invalid or unsupported snapshot file", async (t) => {
   const root = await createTemporaryDirectory(t);
   const snapshotFile = path.join(root, "inventory-baseline.json");
   await fs.writeFile(snapshotFile, JSON.stringify({ version: 999, skills: [] }));
 
   assert.equal(await readInventorySnapshot(snapshotFile), null);
+});
+
+test("rejects malformed saved skill records before using them as a change baseline", async (t) => {
+  const root = await createTemporaryDirectory(t);
+  const snapshotFile = path.join(root, "inventory-baseline.json");
+  const skill = createSkill("/skills/example/SKILL.md");
+  const valid = createSnapshot("2026-01-01T00:00:00.000Z", [
+    { skill, fingerprint: "a".repeat(64) },
+  ]);
+  const malformedSnapshots: unknown[] = [
+    { ...valid, scannedAt: "not a timestamp" },
+    { ...valid, skills: [{ skill, fingerprint: "not-a-hash" }] },
+    { ...valid, skills: [{ skill: { ...skill, name: null }, fingerprint: null }] },
+    { ...valid, skills: [{ skill: { ...skill, metadataIssues: [null] }, fingerprint: null }] },
+    { ...valid, skills: [{ skill: { ...skill, scope: "machine" }, fingerprint: null }] },
+  ];
+
+  for (const snapshot of malformedSnapshots) {
+    await fs.writeFile(snapshotFile, JSON.stringify(snapshot));
+    assert.equal(await readInventorySnapshot(snapshotFile), null);
+  }
+});
+
+test("preserves a baseline when a known location or project registry is unavailable", () => {
+  const skill = createSkill("/projects/example/.agents/skills/docs/SKILL.md", {
+    scope: "project",
+    projectRoot: "/projects/example",
+  });
+  const previous = createSnapshot("2026-01-01T00:00:00.000Z", [{ skill, fingerprint: "old" }]);
+  const applications = [
+    {
+      id: "chatgpt" as const,
+      displayName: "ChatGPT",
+      locations: [
+        {
+          label: "Project skills",
+          path: "/projects/example/.agents/skills",
+          source: "project" as const,
+        },
+      ],
+    },
+  ];
+  assert.equal(isInventoryScanComplete(previous, applications, []), true);
+  assert.equal(
+    isInventoryScanComplete(previous, applications, [
+      {
+        application: "chatgpt",
+        location: "/projects/example/.agents/skills",
+        severity: "info",
+        code: "LOCATION_NOT_FOUND",
+        message: "Missing",
+      },
+    ]),
+    false,
+  );
+  assert.equal(
+    isInventoryScanComplete(previous, [{ ...applications[0], locations: [] }], []),
+    false,
+  );
+  assert.equal(
+    isInventoryScanComplete(previous, applications, [
+      {
+        application: "chatgpt",
+        location: "/state.json",
+        severity: "warning",
+        code: "PROJECT_REGISTRY_INVALID",
+        message: "Unavailable",
+      },
+    ]),
+    false,
+  );
 });

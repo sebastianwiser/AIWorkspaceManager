@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { discoverKnownProjects, type KnownProject } from "./projects.js";
+import { readRegularFileBounded } from "./safe-file.js";
 import type {
   ApplicationId,
   DiscoveredMcpServer,
@@ -14,10 +16,8 @@ import type {
 
 const MAX_CONFIGURATION_BYTES = 2 * 1024 * 1024;
 const REDACTED = "[REDACTED]";
-const SENSITIVE_KEY =
-  /(authorization|cookie|credential|password|private[_-]?key|secret|token|api[_-]?key)/i;
-const SENSITIVE_ARGUMENT =
-  /^--?(?:api[-_]?key|authorization|cookie|credential|password|secret|token)(?:=|$)/i;
+const rawEndpointByServer = new WeakMap<DiscoveredMcpServer, string>();
+const SAFE_ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface McpConfigurationLocation {
   application: ApplicationId;
@@ -53,6 +53,20 @@ export async function discoverMcpServers(
     const result = await scanMcpConfiguration(location);
     servers.push(...result.mcpServers);
     diagnostics.push(...result.diagnostics);
+  }
+
+  // Compare exact private definitions here, then expose only random, scan-local
+  // equality labels. Redacted URLs/arguments must never be used as evidence.
+  const endpointIds = new Map<string, string>();
+  for (const server of servers) {
+    const rawEndpoint = rawEndpointByServer.get(server);
+    if (!rawEndpoint) continue;
+    let matchId = endpointIds.get(rawEndpoint);
+    if (!matchId) {
+      matchId = randomUUID();
+      endpointIds.set(rawEndpoint, matchId);
+    }
+    server.endpointMatchId = matchId;
   }
 
   markDuplicates(servers, diagnostics);
@@ -132,7 +146,9 @@ export async function scanMcpConfiguration(
 
   let document: Record<string, unknown>;
   try {
-    const contents = await fs.readFile(configurationFile, "utf8");
+    const contents = (
+      await readRegularFileBounded(configurationFile, MAX_CONFIGURATION_BYTES)
+    ).toString("utf8");
     const parsed: unknown = location.format === "toml" ? parseToml(contents) : JSON.parse(contents);
     const parsedObject = asObject(parsed);
     if (!parsedObject) {
@@ -175,15 +191,24 @@ export async function scanMcpConfiguration(
       continue;
     }
 
-    const server = createServer(name, definition, location, configurationFile);
-    mcpServers.push(server);
-    if (server.status === "invalid") {
+    try {
+      const server = createServer(name, definition, location, configurationFile);
+      mcpServers.push(server);
+      if (server.status !== "invalid") continue;
       diagnostics.push({
         application: location.application,
         location: configurationFile,
         severity: "warning",
         code: "MCP_SERVER_INVALID",
         message: `MCP server “${name}” is invalid: ${server.issues.join(" ")}`,
+      });
+    } catch {
+      diagnostics.push({
+        application: location.application,
+        location: configurationFile,
+        severity: "warning",
+        code: "MCP_SERVER_INVALID",
+        message: `MCP server “${name}” could not be inspected safely.`,
       });
     }
   }
@@ -293,7 +318,7 @@ function createServer(
       : typeof definition.transport === "string"
         ? definition.transport
         : null;
-  const transport = inferTransport(explicitTransport, command, rawUrl);
+  const transport = inferTransport(explicitTransport, rawCommand, rawUrl);
   const rawArguments = Array.isArray(definition.args)
     ? definition.args.filter((value): value is string => typeof value === "string")
     : [];
@@ -316,7 +341,7 @@ function createServer(
 
   const safeDefinition = sanitizeDefinition(definition);
 
-  return {
+  const server: DiscoveredMcpServer = {
     application: location.application,
     applicationName: location.application === "chatgpt" ? "ChatGPT" : "Claude",
     name,
@@ -333,9 +358,18 @@ function createServer(
     configurationFile,
     configurationFormat: location.format,
     safeConfiguration: formatSafeConfiguration(name, safeDefinition, location.format),
+    endpointMatchId: null,
     status: issues.length > 0 ? "invalid" : "valid",
     issues,
   };
+  const rawEndpoint =
+    transport === "stdio" && rawCommand
+      ? JSON.stringify(["stdio", rawCommand, rawArguments])
+      : rawUrl
+        ? JSON.stringify([transport, rawUrl])
+        : null;
+  if (rawEndpoint) rawEndpointByServer.set(server, rawEndpoint);
+  return server;
 }
 
 function inferTransport(
@@ -354,12 +388,9 @@ function inferTransport(
 }
 
 function sanitizeDefinition(definition: Record<string, unknown>): Record<string, unknown> {
-  const sanitized = sanitizeValue(definition, null);
-  if (!sanitized || typeof sanitized !== "object" || Array.isArray(sanitized)) {
-    return {};
-  }
-
-  const result = sanitized as Record<string, unknown>;
+  // Unknown fields are redacted by default. MCP implementations can place
+  // credentials under arbitrary names, so a denylist cannot be complete.
+  const result = redactUnknownObject(definition);
   if (Array.isArray(definition.args)) {
     result.args = redactArguments(
       definition.args.filter((value): value is string => typeof value === "string"),
@@ -371,29 +402,41 @@ function sanitizeDefinition(definition: Record<string, unknown>): Record<string,
   if (typeof definition.command === "string") {
     result.command = sanitizeCommand(definition.command);
   }
+  for (const key of ["type", "transport"] as const) {
+    if (typeof definition[key] === "string") {
+      result[key] = /^(stdio|http|streamable-http|sse)$/i.test(definition[key])
+        ? definition[key]
+        : REDACTED;
+    }
+  }
+  for (const key of ["env", "headers", "http_headers"] as const) {
+    const values = asObject(definition[key]);
+    if (values)
+      result[key] = Object.fromEntries(Object.keys(values).map((name) => [name, REDACTED]));
+  }
+  const envHeaders = asObject(definition.env_http_headers);
+  if (envHeaders) {
+    result.env_http_headers = Object.fromEntries(
+      Object.entries(envHeaders).map(([name, value]) => [name, safeEnvironmentName(value)]),
+    );
+  }
+  if (definition.bearer_token_env_var !== undefined) {
+    result.bearer_token_env_var = safeEnvironmentName(definition.bearer_token_env_var);
+  }
   return result;
 }
 
-function sanitizeValue(value: unknown, parentKey: string | null): unknown {
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item, parentKey));
-  }
-  const object = asObject(value);
-  if (!object) return value;
-
-  const result: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(object)) {
-    const holdsLiteralSecrets =
-      parentKey === "env" || parentKey === "headers" || parentKey === "http_headers";
-    const namesEnvironmentVariable =
-      key === "bearer_token_env_var" || parentKey === "env_http_headers";
-    if ((holdsLiteralSecrets || SENSITIVE_KEY.test(key)) && !namesEnvironmentVariable) {
-      result[key] = REDACTED;
-    } else {
-      result[key] = sanitizeValue(child, key);
-    }
-  }
-  return result;
+function redactUnknownObject(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      Array.isArray(child)
+        ? child.map(() => REDACTED)
+        : asObject(child)
+          ? redactUnknownObject(child as Record<string, unknown>)
+          : REDACTED,
+    ]),
+  );
 }
 
 function redactArguments(args: readonly string[]): string[] {
@@ -403,57 +446,64 @@ function redactArguments(args: readonly string[]): string[] {
     if (redactNext) {
       result.push(REDACTED);
       redactNext = false;
-    } else if (SENSITIVE_ARGUMENT.test(argument)) {
+    } else if (/^--?[A-Za-z][A-Za-z0-9_-]*=/.test(argument)) {
       const separator = argument.indexOf("=");
-      if (separator >= 0) {
-        result.push(`${argument.slice(0, separator + 1)}${REDACTED}`);
-      } else {
-        result.push(argument);
-        redactNext = true;
-      }
+      result.push(`${argument.slice(0, separator + 1)}${REDACTED}`);
+    } else if (
+      /^--?(?:api[-_]?key|authorization|cookie|credential|password|secret|token|header)$/i.test(
+        argument,
+      )
+    ) {
+      result.push(argument);
+      redactNext = true;
+    } else if (
+      /^--?[A-Za-z][A-Za-z0-9_-]*$/.test(argument) ||
+      /^[A-Za-z0-9_.-]+\.(?:js|mjs|cjs|py|ts|sh)$/.test(argument)
+    ) {
+      result.push(argument);
     } else {
-      result.push(looksLikeSecret(argument) ? REDACTED : argument);
+      result.push(REDACTED);
     }
   }
   return result;
 }
 
 function sanitizeUrl(value: string): string {
-  if (/\$\{[^}]+\}/.test(value)) {
-    return value.replace(/([?&][^=&#]+=)[^&#]*/g, `$1${REDACTED}`);
-  }
-
   try {
     const url = new URL(value);
-    if (url.username) url.username = REDACTED;
-    if (url.password) url.password = REDACTED;
-    for (const key of url.searchParams.keys()) {
-      url.searchParams.set(key, REDACTED);
-    }
-    return url.toString();
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "[INVALID URL]";
+    const pathname = url.pathname && url.pathname !== "/" ? "/[REDACTED PATH]" : "/";
+    const query = url.search ? "?[REDACTED QUERY]" : "";
+    const fragment = url.hash ? "#[REDACTED FRAGMENT]" : "";
+    return `${url.protocol}//${url.host}${pathname}${query}${fragment}`;
   } catch {
     return "[INVALID URL]";
   }
 }
 
 function sanitizeCommand(value: string): string {
-  return value.replace(
-    /((?:[A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD|AUTHORIZATION)[A-Z0-9_]*)=)([^\s]+)/gi,
-    `$1${REDACTED}`,
-  );
+  return /^[A-Za-z0-9_./-]+$/.test(value) && !looksLikeSecret(value) ? value : "[REDACTED COMMAND]";
 }
 
 function looksLikeSecret(value: string): boolean {
   return /^(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{8,}|eyJ[A-Za-z0-9_-]{8,}\.)/.test(value);
 }
 
+function safeEnvironmentName(value: unknown): string {
+  return typeof value === "string" && SAFE_ENVIRONMENT_NAME.test(value) ? value : REDACTED;
+}
+
 function collectEnvironmentVariables(definition: Record<string, unknown>): string[] {
   const names = new Set<string>();
-  for (const key of Object.keys(asObject(definition.env) ?? {})) names.add(key);
+  for (const key of Object.keys(asObject(definition.env) ?? {})) {
+    if (SAFE_ENVIRONMENT_NAME.test(key)) names.add(key);
+  }
   const bearerVariable = definition.bearer_token_env_var;
-  if (typeof bearerVariable === "string") names.add(bearerVariable);
+  if (typeof bearerVariable === "string" && SAFE_ENVIRONMENT_NAME.test(bearerVariable)) {
+    names.add(bearerVariable);
+  }
   for (const value of Object.values(asObject(definition.env_http_headers) ?? {})) {
-    if (typeof value === "string") names.add(value);
+    if (typeof value === "string" && SAFE_ENVIRONMENT_NAME.test(value)) names.add(value);
   }
   collectPlaceholders(definition, names);
   return [...names].sort((left, right) => left.localeCompare(right));
