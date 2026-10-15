@@ -407,6 +407,18 @@ async function readPluginManifest(
     getString(interfaceMetadata?.shortDescription)?.trim() ||
     null;
   if (!description) issues.push("The plugin description is missing.");
+  for (const declared of [
+    document.mcpServers ?? extension?.mcpServers,
+    extension?.apps ?? document.apps,
+  ]) {
+    if (typeof declared !== "string") continue;
+    const resolved = resolveInside(candidate.pluginRoot, declared);
+    if (!resolved || !(await isSafeDeclaredComponent(candidate.pluginRoot, resolved))) {
+      issues.push(
+        "A declared plugin component path is missing, unreadable, or outside the plugin directory.",
+      );
+    }
+  }
   const name = rawName || path.basename(candidate.pluginRoot);
   const mcpServers = await readMcpReferences(
     candidate.pluginRoot,
@@ -609,6 +621,24 @@ function resolveInside(root: string, relativePath: string): string | null {
   if (!relativePath.startsWith("./") || relativePath.includes("\\")) return null;
   const resolved = path.resolve(root, relativePath);
   return isPathInside(root, resolved) ? resolved : null;
+}
+
+async function isSafeDeclaredComponent(root: string, filePath: string): Promise<boolean> {
+  try {
+    const [realRoot, realFile, stats] = await Promise.all([
+      fs.realpath(root),
+      fs.realpath(filePath),
+      fs.lstat(filePath),
+    ]);
+    return (
+      isPathInside(realRoot, realFile) &&
+      stats.isFile() &&
+      !stats.isSymbolicLink() &&
+      stats.size <= MAX_COMPONENT_BYTES
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isPathInside(root: string, candidate: string): boolean {

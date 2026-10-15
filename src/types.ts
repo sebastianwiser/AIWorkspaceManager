@@ -7,6 +7,25 @@ export type SkillSourceId =
 
 export type SkillScope = "global" | "project";
 export type InventoryKind = "skills" | "mcp" | "plugins";
+export type AuditFamily = "structure" | "exposure" | "commands" | "provenance";
+export type AuditItemKind = "skill" | "mcp" | "plugin" | "source";
+export type AuditSignal =
+  | "missing-file"
+  | "unreadable-file"
+  | "oversized-file"
+  | "symlink-file"
+  | "world-writable"
+  | "world-readable-config"
+  | "literal-credential-pattern"
+  | "credential-assignment"
+  | "risky-command-pattern"
+  | "broad-access-pattern"
+  | "missing-executable"
+  | "non-executable"
+  | "missing-resource"
+  | "resource-symlink"
+  | "resource-check-limited"
+  | "bundle-check-limited";
 export type McpTransport = "stdio" | "http" | "sse" | "unknown";
 export type McpConfigurationFormat = "json" | "toml";
 export type McpStatus = "valid" | "invalid" | "duplicate";
@@ -95,6 +114,90 @@ export interface ScanResult {
   mcpServers: DiscoveredMcpServer[];
   plugins: DiscoveredPlugin[];
   diagnostics: ScanDiagnostic[];
+}
+
+/** Sanitized, typed observations collected only from paths found by the trusted scan. */
+export interface AuditObservation {
+  itemKind: Exclude<AuditItemKind, "source">;
+  itemId: string;
+  application: ApplicationId;
+  sourceFile: string;
+  line: number | null;
+  signal: AuditSignal;
+}
+
+export interface AuditFinding {
+  id: string;
+  ruleId: string;
+  family: AuditFamily;
+  severity: "info" | "warning" | "critical";
+  confidence: "observed" | "possible";
+  title: string;
+  explanation: string;
+  remedy: string;
+  application: ApplicationId;
+  itemKind: AuditItemKind;
+  itemIds: string[];
+  sourceFile: string;
+  line: number | null;
+  /** Controlled text only; never copied from a discovered file or configuration value. */
+  evidence: string;
+}
+
+export interface AuditCoverage {
+  application: ApplicationId;
+  family: AuditFamily;
+  status: "evaluated" | "partial" | "not-evaluated";
+  /** Stable reasons rather than untrusted diagnostic or file contents. */
+  reasons: Array<"scan-incomplete" | "file-not-inspected">;
+}
+
+export interface AuditReport {
+  generatedAt: string;
+  findings: AuditFinding[];
+  coverage: AuditCoverage[];
+  /** Local fingerprints; contents and matched values are never included. */
+  files?: AuditFileRecord[];
+  fileChanges?: AuditFileChange[];
+  fileChangeTrackingError?: string;
+}
+
+export interface AuditFileRecord {
+  application: ApplicationId;
+  itemKind: Exclude<AuditItemKind, "source">;
+  itemId: string;
+  sourceFile: string;
+  bytes: number;
+  sha256: string;
+  isScript: boolean;
+}
+
+export interface AuditFileChange {
+  type: "added" | "modified" | "removed";
+  file: AuditFileRecord;
+}
+
+/** A narrowly scoped, local-folder skill import. Plans contain no file contents. */
+export interface SkillImportPreview {
+  id: string;
+  application: ApplicationId;
+  sourceDirectory: string;
+  destinationDirectory: string;
+  fileCount: number;
+  totalBytes: number;
+  includesScripts: boolean;
+  expiresAt: string;
+}
+
+export type SkillImportSelection =
+  { status: "cancelled" } | { status: "ready"; preview: SkillImportPreview };
+
+export interface SkillImportReceipt {
+  id: string;
+  application: ApplicationId;
+  destinationDirectory: string;
+  fileCount: number;
+  appliedAt: string;
 }
 
 export interface DiscoveredMcpServer {
@@ -191,6 +294,7 @@ export type CapabilityGroup = SkillCapabilityGroup | McpCapabilityGroup;
 export interface DesktopScanResult extends ScanResult {
   scannedAt: string;
   changes: InventoryChanges;
+  audit: AuditReport;
 }
 
 export type SkillChangeType = "added" | "modified" | "moved" | "removed";
@@ -221,6 +325,9 @@ export interface DesktopApi {
   scan(): Promise<DesktopScanResult>;
   readSkillContent(instructionFile: string): Promise<SkillContentResult>;
   resetBaseline(): Promise<InventoryChanges>;
+  chooseSkillImport(application: ApplicationId): Promise<SkillImportSelection>;
+  applySkillImport(planId: string): Promise<SkillImportReceipt | null>;
+  undoSkillImport(receiptId: string): Promise<string | null>;
 }
 
 export interface LocationScanResult {
@@ -233,7 +340,7 @@ export interface CliOptions {
   details: boolean;
   json: boolean;
   help: boolean;
-  kind: InventoryKind;
+  kind: InventoryKind | "audit";
   search: string | null;
   sources: SkillSourceId[];
   metadataStatuses: MetadataStatus[];

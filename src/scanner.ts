@@ -222,6 +222,7 @@ async function walkDirectory({
     if (
       !entry.isDirectory() ||
       IGNORED_DIRECTORY_NAMES.has(entry.name) ||
+      entry.name.startsWith(".skillmanager-") ||
       shouldIgnorePluginStateDirectory(location, depth, entry.name)
     ) {
       continue;

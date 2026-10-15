@@ -17,6 +17,7 @@ const emptyScan: DesktopScanResult = {
     comparedAt: "2026-10-14T12:00:00.000Z",
     items: [],
   },
+  audit: { generatedAt: "2026-10-14T12:00:00.000Z", findings: [], coverage: [] },
 };
 
 function render(scanResult: DesktopScanResult | null, error: string | null = null): string {

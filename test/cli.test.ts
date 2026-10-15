@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatDetailedSkillGroups, formatSkillGroups, parseArguments } from "../src/cli.js";
-import type { ApplicationIdentity, DiscoveredSkill } from "../src/types.js";
+import {
+  formatAuditReport,
+  formatDetailedSkillGroups,
+  formatSkillGroups,
+  parseArguments,
+} from "../src/cli.js";
+import type { ApplicationIdentity, AuditReport, DiscoveredSkill } from "../src/types.js";
 
 function createSkill(overrides: Partial<DiscoveredSkill> = {}): DiscoveredSkill {
   return {
@@ -111,6 +116,66 @@ test("parses MCP inventory output", () => {
 
 test("parses plugin inventory output", () => {
   assert.equal(parseArguments(["scan", "--kind", "plugins", "--app", "all"]).kind, "plugins");
+});
+
+test("parses read-only audit output and formats coverage without raw evidence", () => {
+  assert.equal(parseArguments(["scan", "--kind", "audit", "--app", "all"]).kind, "audit");
+  const report: AuditReport = {
+    generatedAt: "2026-10-15T00:00:00.000Z",
+    findings: [
+      {
+        id: "one",
+        ruleId: "file.credential-pattern",
+        family: "exposure",
+        severity: "warning",
+        confidence: "possible",
+        title: "Credential-like text found",
+        explanation: "A pattern was observed.",
+        remedy: "Inspect the line privately.",
+        application: "chatgpt",
+        itemKind: "skill",
+        itemIds: ["one"],
+        sourceFile: "/skills/SKILL.md",
+        line: 2,
+        evidence: "Only a signal was retained.",
+      },
+    ],
+    coverage: [
+      {
+        application: "chatgpt",
+        family: "exposure",
+        status: "partial",
+        reasons: ["file-not-inspected"],
+      },
+    ],
+  };
+  const output = formatAuditReport(report, { details: true, search: null });
+  assert.match(output, /Credential-like text found/);
+  assert.match(output, /Coverage is incomplete/);
+  assert.match(output, /No server or command was run/);
+});
+
+test("summarizes a long audit by default while details includes every finding", () => {
+  const findings: AuditReport["findings"] = Array.from({ length: 32 }, (_, index) => ({
+    id: `finding-${index}`,
+    ruleId: "file.unreadable",
+    family: "structure",
+    severity: "warning",
+    confidence: "observed",
+    title: `Finding ${index}`,
+    explanation: "The file was unreadable.",
+    remedy: "Review it.",
+    application: "chatgpt",
+    itemKind: "skill",
+    itemIds: [`skill-${index}`],
+    sourceFile: `/skills/${index}/SKILL.md`,
+    line: null,
+    evidence: "Bounded read failed.",
+  }));
+  const report: AuditReport = { generatedAt: "2026-10-15T00:00:00.000Z", findings, coverage: [] };
+  assert.match(formatAuditReport(report, { details: false, search: null }), /Showing the first 30/);
+  assert.doesNotMatch(formatAuditReport(report, { details: false, search: null }), /Finding 31/);
+  assert.match(formatAuditReport(report, { details: true, search: null }), /Finding 31/);
 });
 
 test("rejects an unsupported application", () => {

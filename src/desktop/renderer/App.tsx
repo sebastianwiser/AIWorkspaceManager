@@ -15,6 +15,7 @@ import { createTextDiff } from "../../text-diff.js";
 import type { TextDiffResult } from "../../text-diff.js";
 import type {
   ApplicationChoice,
+  AuditFinding,
   CapabilityGroup,
   DesktopScanResult,
   DiscoveredMcpServer,
@@ -35,6 +36,8 @@ import type {
   SortOrder,
 } from "../../types.js";
 import { AlertIcon, FolderIcon, MarkIcon, RefreshIcon, SearchIcon, ShieldIcon } from "./Icons.js";
+import { AuditPanel } from "./AuditPanel.js";
+import { ManagePanel } from "./ManagePanel.js";
 import { RelationshipPanel } from "./RelationshipPanel.js";
 
 type SourceFilter = SkillSourceId | "all";
@@ -85,7 +88,10 @@ export function App() {
   const [isResettingBaseline, setIsResettingBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<InventoryMode>("inventory");
-  const [inventoryKind, setInventoryKind] = useState<InventoryKind | "relationships">("skills");
+  const [inventoryKind, setInventoryKind] = useState<
+    InventoryKind | "relationships" | "audit" | "manage"
+  >("skills");
+  const [auditFocus, setAuditFocus] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [source, setSource] = useState<SourceFilter>("all");
@@ -212,6 +218,23 @@ export function App() {
     setChangeType("all");
   }
 
+  function inspectAuditFinding(finding: AuditFinding): void {
+    const itemId = finding.itemIds[0];
+    if (!itemId) return;
+    if (finding.itemKind === "skill") {
+      const skill = allSkills.find((item) => getSkillIdentity(item) === itemId);
+      if (!skill) return;
+      setAuditFocus(itemId);
+      clearFilters();
+      setMode("inventory");
+      setSelectedCapabilityId(findSkillCapabilityGroup(skillCapabilityGroups, skill)?.id ?? null);
+      setInventoryKind("skills");
+    } else if (finding.itemKind === "mcp" || finding.itemKind === "plugin") {
+      setAuditFocus(itemId);
+      setInventoryKind(finding.itemKind === "mcp" ? "mcp" : "plugins");
+    }
+  }
+
   async function resetBaseline(): Promise<void> {
     if (
       !window.confirm(
@@ -259,7 +282,10 @@ export function App() {
             type="button"
             className={inventoryKind === "skills" ? "active" : ""}
             aria-current={inventoryKind === "skills" ? "page" : undefined}
-            onClick={() => setInventoryKind("skills")}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("skills");
+            }}
           >
             Skills
           </button>
@@ -267,7 +293,10 @@ export function App() {
             type="button"
             className={inventoryKind === "mcp" ? "active" : ""}
             aria-current={inventoryKind === "mcp" ? "page" : undefined}
-            onClick={() => setInventoryKind("mcp")}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("mcp");
+            }}
           >
             MCP Servers
           </button>
@@ -275,7 +304,10 @@ export function App() {
             type="button"
             className={inventoryKind === "plugins" ? "active" : ""}
             aria-current={inventoryKind === "plugins" ? "page" : undefined}
-            onClick={() => setInventoryKind("plugins")}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("plugins");
+            }}
           >
             Plugins
           </button>
@@ -283,16 +315,41 @@ export function App() {
             type="button"
             className={inventoryKind === "relationships" ? "active" : ""}
             aria-current={inventoryKind === "relationships" ? "page" : undefined}
-            onClick={() => setInventoryKind("relationships")}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("relationships");
+            }}
           >
             Relationships
+          </button>
+          <button
+            type="button"
+            className={inventoryKind === "audit" ? "active" : ""}
+            aria-current={inventoryKind === "audit" ? "page" : undefined}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("audit");
+            }}
+          >
+            Audit
+          </button>
+          <button
+            type="button"
+            className={inventoryKind === "manage" ? "active" : ""}
+            aria-current={inventoryKind === "manage" ? "page" : undefined}
+            onClick={() => {
+              setAuditFocus(null);
+              setInventoryKind("manage");
+            }}
+          >
+            Import
           </button>
         </nav>
 
         <div className="titlebar-actions">
           <div className="read-only-badge">
             <ShieldIcon />
-            Read-only
+            Local-first
           </div>
           <button
             className="rescan-button"
@@ -307,7 +364,17 @@ export function App() {
       </header>
 
       <main>
-        {inventoryKind === "relationships" ? (
+        {inventoryKind === "manage" ? (
+          <ManagePanel onChanged={refreshInventory} />
+        ) : inventoryKind === "audit" ? (
+          <AuditPanel
+            scanResult={scanResult}
+            isScanning={isScanning}
+            error={error}
+            onRetry={refreshInventory}
+            onInspect={inspectAuditFinding}
+          />
+        ) : inventoryKind === "relationships" ? (
           <RelationshipPanel
             scanResult={scanResult}
             isScanning={isScanning}
@@ -320,6 +387,7 @@ export function App() {
             isScanning={isScanning}
             error={error}
             onRetry={refreshInventory}
+            focusId={auditFocus}
           />
         ) : inventoryKind === "plugins" ? (
           <PluginInventoryPanel
@@ -327,6 +395,7 @@ export function App() {
             isScanning={isScanning}
             error={error}
             onRetry={refreshInventory}
+            focusId={auditFocus}
           />
         ) : (
           <>
@@ -559,6 +628,7 @@ export function App() {
                       key={`${selectedCapability.id}:${mode}`}
                       capability={selectedCapability}
                       changes={selectedChanges}
+                      focusDefinitionId={auditFocus}
                     />
                   ) : (
                     <EmptyDetails />
@@ -572,7 +642,7 @@ export function App() {
 
       <footer>
         <ShieldIcon />
-        Local-only discovery · No skills, plugins, or MCP servers are executed or changed
+        Inventory scans are read-only · Imports require confirmation and never run code
       </footer>
     </div>
   );
@@ -583,18 +653,28 @@ function PluginInventoryPanel({
   isScanning,
   error,
   onRetry,
+  focusId,
 }: {
   scanResult: DesktopScanResult | null;
   isScanning: boolean;
   error: string | null;
   onRetry: () => void;
+  focusId: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [project, setProject] = useState<ProjectFilter>("all");
   const [status, setStatus] = useState<PluginStatus | "all">("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusId);
   const plugins = scanResult?.plugins ?? [];
+  useEffect(() => {
+    if (!focusId || !plugins.some((plugin) => getPluginIdentity(plugin) === focusId)) return;
+    setQuery("");
+    setApplication("all");
+    setProject("all");
+    setStatus("all");
+    setSelectedId(focusId);
+  }, [focusId, plugins]);
   const projects = useMemo(
     () => getPluginProjectOptions(plugins, application),
     [application, plugins],
@@ -1037,17 +1117,26 @@ function McpInventoryPanel({
   isScanning,
   error,
   onRetry,
+  focusId,
 }: {
   scanResult: DesktopScanResult | null;
   isScanning: boolean;
   error: string | null;
   onRetry: () => void;
+  focusId: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
   const [project, setProject] = useState<ProjectFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusId);
   const servers = scanResult?.mcpServers ?? [];
+  useEffect(() => {
+    if (!focusId || !servers.some((server) => getMcpServerIdentity(server) === focusId)) return;
+    setQuery("");
+    setApplication("all");
+    setProject("all");
+    setSelectedId(focusId);
+  }, [focusId, servers]);
   const capabilityGroups = useMemo(() => createMcpCapabilityGroups(servers), [servers]);
   const projects = useMemo(
     () => getMcpProjectOptions(servers, application),
@@ -1593,13 +1682,21 @@ function SkillCapabilityRow({
 function SkillDetails({
   capability,
   changes,
+  focusDefinitionId,
 }: {
   capability: SkillCapabilityGroup;
   changes: readonly SkillChange[];
+  focusDefinitionId: string | null;
 }) {
   const [activeTab, setActiveTab] = useState<DetailTab>("overview");
   const [contentResult, setContentResult] = useState<SkillContentResult | null>(null);
-  const [selectedVariantId, setSelectedVariantId] = useState(capability.variants[0]?.id ?? "");
+  const [selectedVariantId, setSelectedVariantId] = useState(
+    capability.variants.find((item) =>
+      item.definitions.some((definition) => getSkillIdentity(definition) === focusDefinitionId),
+    )?.id ??
+      capability.variants[0]?.id ??
+      "",
+  );
   const detailRef = useRef<HTMLDivElement>(null);
   const variant =
     capability.variants.find((item) => item.id === selectedVariantId) ?? capability.variants[0];
@@ -1611,6 +1708,13 @@ function SkillDetails({
       ),
     ) ?? null;
   const canReadContent = change?.type !== "removed";
+
+  useEffect(() => {
+    const focusedVariant = capability.variants.find((item) =>
+      item.definitions.some((definition) => getSkillIdentity(definition) === focusDefinitionId),
+    );
+    if (focusedVariant) setSelectedVariantId(focusedVariant.id);
+  }, [capability.variants, focusDefinitionId]);
 
   useEffect(() => {
     if (!capability.variants.some((item) => item.id === selectedVariantId)) {

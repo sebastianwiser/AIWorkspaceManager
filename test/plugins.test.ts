@@ -294,6 +294,24 @@ test("does not read plugin component files through intermediate symlinks", async
     locations: [{ application: "chatgpt", path: pluginRoot, origin: "local", originName: "Local" }],
   });
   assert.deepEqual(result.plugins[0]?.mcpServers, []);
+  assert.equal(result.plugins[0]?.status, "incomplete");
+  assert.ok(
+    result.plugins[0]?.issues.some((issue) => issue.startsWith("A declared plugin component path")),
+  );
+});
+
+test("marks missing declared component files without exposing their path value", async (t) => {
+  const root = await temporaryDirectory(t);
+  const missing = "./private-token-file.json";
+  await fs.writeFile(
+    path.join(root, "plugin.json"),
+    JSON.stringify({ name: "example", description: "Example.", mcpServers: missing }),
+  );
+  const result = await discoverPlugins({
+    locations: [{ application: "chatgpt", path: root, origin: "local", originName: "Local" }],
+  });
+  assert.equal(result.plugins[0]?.status, "incomplete");
+  assert.doesNotMatch(JSON.stringify(result), /private-token-file/);
 });
 
 test("assigns a nested plugin skill only to its closest owning bundle", async (t) => {

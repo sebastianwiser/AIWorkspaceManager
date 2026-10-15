@@ -1,6 +1,8 @@
 import process from "node:process";
 import readline from "node:readline/promises";
 import { getApplications, getScanContext } from "./applications.js";
+import { collectAuditEvidence } from "./audit/collect.js";
+import { createAuditReport } from "./audit/index.js";
 import {
   createInventoryView,
   createMcpInventoryView,
@@ -12,12 +14,12 @@ import type {
   ApplicationDefinition,
   ApplicationId,
   ApplicationIdentity,
+  AuditReport,
   CliIo,
   CliOptions,
   DiscoveredSkill,
   DiscoveredMcpServer,
   DiscoveredPlugin,
-  InventoryKind,
   InventorySortField,
   MetadataStatus,
   ScanResult,
@@ -58,20 +60,21 @@ Usage:
 
 Options:
   --app <name>       Choose chatgpt, claude, or all. If omitted, a menu is shown.
-  --kind <kind>      Show skills (default), mcp servers, or plugins.
-  --search <text>    Search skill names, folder names, and descriptions.
-  --source <list>    Filter by comma-separated source IDs.
-  --status <list>    Filter by comma-separated metadata statuses.
-  --sort <field>     Sort by name, application, source, or modified.
+  --kind <kind>      Show skills (default), mcp servers, plugins, or audit findings.
+  --search <text>    Search the selected inventory or audit findings.
+  --source <list>    Filter skills by comma-separated source IDs.
+  --status <list>    Filter skills by comma-separated metadata statuses.
+  --sort <field>     Sort skills by name, application, source, or modified.
   --order <order>    Use ascending (asc) or descending (desc) order.
-  --details          Show descriptions, sources, metadata status, and locations.
-  --json             Print complete machine-readable JSON.
+  --details          Show additional details for the selected view.
+  --json             Print machine-readable inventory or audit JSON.
   --help             Show this help message.
 
 Examples:
   skillmanager scan --app chatgpt
   skillmanager scan --kind mcp --app all --details
   skillmanager scan --kind plugins --app all --details
+  skillmanager scan --kind audit --app all --details
   skillmanager scan --app chatgpt --details
   skillmanager scan --app all --search document --source personal,plugin
   skillmanager scan --app all --status invalid,missing --sort source
@@ -109,6 +112,20 @@ export async function runCli(args: string[], io: CliIo = defaultIo()): Promise<v
     projects: context.projects,
     initialDiagnostics: context.diagnostics,
   });
+  if (options.kind === "audit") {
+    const evidence = await collectAuditEvidence(scanResult);
+    const report = createAuditReport(
+      scanResult,
+      evidence.observations,
+      applications.map((item) => item.id),
+      new Date().toISOString(),
+      evidence.files,
+    );
+    io.write(
+      options.json ? `${JSON.stringify(report, null, 2)}\n` : formatAuditReport(report, options),
+    );
+    return;
+  }
   const result: ScanResult = {
     ...scanResult,
     skills: createInventoryView(scanResult.skills, {
@@ -174,7 +191,7 @@ export function parseArguments(args: string[]): CliOptions {
     } else if (argument === "--kind") {
       options.kind = parseSingleOption(
         readOptionValue(normalizedArgs, index, "--kind"),
-        ["skills", "mcp", "plugins"] as const satisfies readonly InventoryKind[],
+        ["skills", "mcp", "plugins", "audit"] as const satisfies readonly CliOptions["kind"][],
         "--kind",
       );
       index += 1;
@@ -217,6 +234,59 @@ export function parseArguments(args: string[]): CliOptions {
   }
 
   return options;
+}
+
+/** The CLI and desktop receive the same report; only presentation differs. */
+export function formatAuditReport(
+  report: AuditReport,
+  options: Pick<CliOptions, "details" | "search">,
+): string {
+  const query = options.search?.trim().toLocaleLowerCase() ?? "";
+  const findings = report.findings.filter(
+    (finding) =>
+      query === "" ||
+      [finding.title, finding.ruleId, finding.sourceFile, finding.family]
+        .join("\n")
+        .toLocaleLowerCase()
+        .includes(query),
+  );
+  const shownFindings = options.details ? findings : findings.slice(0, 30);
+  const lines = [
+    "\nRead-only structural and static security audit.",
+    `Found ${findings.length} finding${findings.length === 1 ? "" : "s"}${query ? ` (${report.findings.length} total)` : ""}.`,
+  ];
+  if (shownFindings.length < findings.length) {
+    lines.push(`Showing the first ${shownFindings.length}; use --details to inspect all findings.`);
+  }
+  for (const finding of shownFindings) {
+    const location = `${shortenHomePath(finding.sourceFile)}${finding.line ? `:${finding.line}` : ""}`;
+    lines.push(
+      `  [${finding.severity}] ${sanitizeSingleLine(finding.title)} (${finding.application}, ${finding.family}, ${finding.confidence})`,
+      `    ${sanitizeSingleLine(location)}`,
+    );
+    if (options.details) {
+      lines.push(
+        `    Evidence: ${sanitizeSingleLine(finding.evidence)}`,
+        `    Why: ${sanitizeSingleLine(finding.explanation)}`,
+        `    Next: ${sanitizeSingleLine(finding.remedy)}`,
+      );
+    }
+  }
+  const incomplete = report.coverage.filter((item) => item.status !== "evaluated");
+  if (incomplete.length > 0) {
+    lines.push("", "Coverage is incomplete:");
+    for (const item of incomplete) {
+      lines.push(
+        `  ${item.application} / ${item.family}: ${item.status} (${item.reasons.join(", ")})`,
+      );
+    }
+  } else {
+    lines.push("", "Supported static checks were evaluated for the selected applications.");
+  }
+  lines.push(
+    "This is a static review, not proof that an item is safe. No server or command was run.\n",
+  );
+  return `${lines.join("\n")}\n`;
 }
 
 function expandApplicationChoice(choice: ApplicationChoice): ApplicationId[] {

@@ -1,7 +1,7 @@
 {
   "name": "skillmanager-os",
   "version": "0.4.0",
-  "description": "A read-only desktop app and CLI for discovering local AI skills, plugins, and MCP servers.",
+  "description": "A local-first desktop app and CLI for discovering, auditing, and safely importing AI skills.",
   "type": "module",
   "main": "./dist/desktop/main.js",
   "bin": {

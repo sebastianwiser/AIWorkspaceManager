@@ -1,7 +1,8 @@
 # Audit and management architecture
 
-Status: accepted for implementation planning, 2026-10-14. Pillars 3 and 4 are **not** shipped by
-this decision.
+Status: accepted 2026-10-14. Pillar 3A/3B were implemented 2026-10-15 as bounded, read-only static
+checks. A narrow Pillar 4 action—additive local skill-folder import—was implemented 2026-10-15.
+Other management operations are not shipped.
 
 ## Context
 
@@ -21,7 +22,7 @@ Supported local sources
   → relationship projection (observed ownership and cross-app evidence)
   → pure audit rules → findings with evidence and uncertainty
   → pure management planner → preview with preconditions and recovery plan
-  → trusted executor (Pillar 4 only, after separate approval)
+  → trusted executor (Pillar 4 only, after explicit user confirmation)
   → rescan + verification + local activity record
 ```
 
@@ -92,17 +93,21 @@ exports, logs, or activity records by default.
 
 ## Delivery sequence and gates
 
-1. **3A read-only structural audit:** shared finding schema, pure rules, per-scan completeness,
-   CLI/desktop presentation, tests. No new filesystem or network reach.
-2. **3B static security audit:** narrowly collected evidence for secrets, permissions, risky
-   commands, and provenance. Rule-by-rule false-positive review and redaction tests.
-3. **4A planning only:** choose one reversible operation (prefer enable/disable of a supported
-   item), produce exact diffs and preconditions, and test plans without applying them.
-4. **4B first executor:** trusted, single-action apply with confirmation, backup, drift rejection,
-   rescan, and rollback tests. Ship only after fault-injection tests for partial failure.
-5. **4C additional operations:** install/update/remove are separate action adapters with their own
-   source validation, compatibility checks, and recovery tests. Portable workspace import/export
-   remains a distinct later design.
+1. **3A read-only structural audit — implemented:** shared finding schema, pure rules, per-scan
+   completeness, CLI/desktop presentation, tests. Only bounded checks of already discovered local
+   paths were added; no network or execution reach.
+2. **3B static security audit — implemented:** narrowly collected, value-free signals for possible
+   credentials, permissions, risky commands, and provenance, with redaction and uncertainty tests.
+   This is heuristic review, not a complete security or policy assessment.
+3. **4A/4B first narrow action — implemented:** one local skill folder can be added to a global
+   ChatGPT or Claude skills location after preview and native confirmation. It checks bounds,
+   rejects in-bundle links and existing destinations, detects source/destination drift, stages and
+   verifies the copy, and offers same-session undo by moving an unchanged import into a recovery
+   folder. This action cannot overwrite or delete an existing skill, so it needs no backup of an
+   existing destination. It does not support archives, remote packages, or scripts.
+4. **4C additional operations — deferred:** install/update/remove are separate action adapters with
+   their own source validation, compatibility checks, and recovery tests. Portable workspace
+   import/export remains a distinct later design.
 
 MVP 2B live MCP status is still deferred. Its explicit, bounded start/contact behavior needs a
 separate consent and timeout design; audit rules must not quietly introduce it.
