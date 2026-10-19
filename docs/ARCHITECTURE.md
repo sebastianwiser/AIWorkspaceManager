@@ -38,6 +38,7 @@ Electron main ──────┘                                   │
 | `src/changes.ts`                                                          | Skill inventory snapshots and baseline comparison.                                             |
 | `src/audit/collect.ts`, `src/audit/index.ts`, `src/audit/integrity.ts`    | Sanitized bounded evidence, pure audit rules and coverage, file fingerprints and comparison.   |
 | `src/management/import-skill.ts`                                          | Additive local skill-folder plan, staging, verification, and recoverable undo.                 |
+| `src/management/history.ts`                                               | Versioned import journal, restart reconciliation, and saved undo state.                        |
 | `src/desktop/main.ts`, `src/desktop/preload.cts`, `src/desktop/renderer/` | Trusted desktop process, narrow bridge, and React interface.                                   |
 | `src/cli.ts`, `src/types.ts`, `test/`                                     | CLI contract, shared types, and module-aligned tests.                                          |
 
@@ -73,9 +74,11 @@ The only write path is the local skill-folder Import action. The renderer suppli
 application and an opaque preview ID, not an arbitrary destination path. Electron main chooses the
 known global skills root, collects a native folder selection, builds a time-limited plan, and
 requires a second native confirmation. Apply rechecks hashes and directory identity, copies through
-a private stage, and verifies the result. Undo moves an unchanged import to recovery. Future
-archive, update, remove, plugin, or MCP operations need separate planners and safety tests; they
-must not be smuggled into this action.
+a private stage, and verifies the result. A versioned journal records intent before the copy,
+completion after verification, and recovery intent before undo. Startup and UI reads reconcile each
+record with the filesystem without retrying interrupted actions. Undo moves an unchanged import to
+recovery, including after restart. Future archive, update, remove, plugin, or MCP operations need
+separate planners and safety tests; they must not be smuggled into this action.
 
 The [security model](SECURITY.md) documents what these checks do and do not protect against. The
 [architecture decision](decisions/0001-audit-and-management-architecture.md) records the original

@@ -200,6 +200,17 @@ export interface SkillImportReceipt {
   appliedAt: string;
 }
 
+export interface SkillImportHistoryEntry {
+  id: string;
+  application: ApplicationId;
+  destinationDirectory: string;
+  fileCount: number;
+  startedAt: string;
+  appliedAt: string | null;
+  recoveryDirectory: string | null;
+  status: "unchanged" | "changed" | "missing" | "needs-review" | "recovered";
+}
+
 export interface DiscoveredMcpServer {
   application: ApplicationId;
   applicationName: string;
@@ -328,6 +339,7 @@ export interface DesktopApi {
   chooseSkillImport(application: ApplicationId): Promise<SkillImportSelection>;
   applySkillImport(planId: string): Promise<SkillImportReceipt | null>;
   undoSkillImport(receiptId: string): Promise<string | null>;
+  listSkillImportHistory(): Promise<SkillImportHistoryEntry[]>;
 }
 
 export interface LocationScanResult {

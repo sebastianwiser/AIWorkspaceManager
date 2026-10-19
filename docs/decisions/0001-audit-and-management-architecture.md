@@ -112,6 +112,11 @@ exports, logs, or activity records by default.
 MVP 2B live MCP status is still deferred. Its explicit, bounded start/contact behavior needs a
 separate consent and timeout design; audit rules must not quietly introduce it.
 
+**Follow-up:** The first action now records versioned local import history before copying and
+reconciles completed imports on restart. Unchanged imports remain undoable across sessions;
+interrupted operations require manual review and are not retried automatically. This supersedes the
+same-session limit in the original 4A/4B delivery note above.
+
 ## Rejected shortcuts
 
 - Treating normalized names as ownership or equivalence.

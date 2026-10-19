@@ -36,14 +36,14 @@ interpretation of results.
 
 ## What you can do today
 
-| View              | What it shows                                                                                                                                                                      |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Skills**        | Global and known-project skills, metadata, source, and safe Markdown preview. Same capability appears as one block across apps, with selectable variants and a read-only diff.     |
-| **MCP Servers**   | Local stdio, HTTP, and SSE definitions, scope, transport, sanitized configuration, and duplicate or invalid definitions. Servers are never started or contacted.                   |
-| **Plugins**       | Local bundles, installation evidence, provenance, and included skills, MCP declarations, apps, and hooks. Cached does not mean installed.                                          |
-| **Relationships** | Evidence-aware links among applications, projects, plugins, skills, and configured MCP servers. A matching name alone is not treated as proof of equivalence.                      |
-| **Audit**         | Structural and static security findings, bounded bundle inspection, potential access, change fingerprints, and explicit incomplete-check coverage.                                 |
-| **Import**        | Add one local skill folder to a global ChatGPT or Claude skills location after preview and confirmation. An unchanged import can be moved to recovery during the same app session. |
+| View              | What it shows                                                                                                                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Skills**        | Global and known-project skills, metadata, source, and safe Markdown preview. Same capability appears as one block across apps, with selectable variants and a read-only diff.                     |
+| **MCP Servers**   | Local stdio, HTTP, and SSE definitions, scope, transport, sanitized configuration, and duplicate or invalid definitions. Servers are never started or contacted.                                   |
+| **Plugins**       | Local bundles, installation evidence, provenance, and included skills, MCP declarations, apps, and hooks. Cached does not mean installed.                                                          |
+| **Relationships** | Evidence-aware links among applications, projects, plugins, skills, and configured MCP servers. A matching name alone is not treated as proof of equivalence.                                      |
+| **Audit**         | Structural and static security findings, bounded bundle inspection, potential access, change fingerprints, and explicit incomplete-check coverage.                                                 |
+| **Import**        | Add one local skill folder to a global ChatGPT or Claude skills location after preview and confirmation. Local history tracks imports across restarts; unchanged imports can be moved to recovery. |
 
 Desktop scans also compare skill inventory against a local baseline, showing added, modified, moved,
 and removed definitions. Read-only discovery and the CLI remain separate from the confirmed Import
@@ -58,7 +58,8 @@ action.
 - Scans are bounded to supported locations and known projects, skip links and dependency/build
   folders, and report partial checks instead of calling an incomplete audit “clean.”
 - Import is additive: no archives, downloads, overwrites, project installs, updates, or automatic
-  setup scripts. The app verifies copied files and does not delete them on undo.
+  setup scripts. The app verifies copied files and does not delete them on undo. Interrupted actions
+  are flagged for manual review, never retried automatically.
 - A static finding is a prompt to inspect, not proof of compromise; no finding is not proof of
   safety. JSON output and local baselines include file paths and hashes and should be treated as
   local data.

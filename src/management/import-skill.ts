@@ -13,7 +13,7 @@ const PLAN_LIFETIME_MS = 10 * 60 * 1000;
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 const SCRIPT_EXTENSION = /\.(?:js|cjs|mjs|ts|py|sh|bash|zsh|ps1|bat|cmd)$/i;
 
-interface PlannedFile {
+export interface PlannedFile {
   relativePath: string;
   bytes: number;
   sha256: string;
@@ -84,6 +84,7 @@ export async function planLocalSkillImport(
 export async function applyLocalSkillImport(
   plan: SkillImportPlan,
   now = Date.now(),
+  receiptId: string = randomUUID(),
 ): Promise<AppliedSkillImport> {
   if (now >= Date.parse(plan.preview.expiresAt)) {
     throw new Error("This preview expired. Select the skill folder again.");
@@ -144,7 +145,7 @@ export async function applyLocalSkillImport(
     committed = true;
     return {
       receipt: {
-        id: randomUUID(),
+        id: receiptId,
         application: plan.preview.application,
         destinationDirectory: plan.preview.destinationDirectory,
         fileCount: plan.files.length,
@@ -176,7 +177,7 @@ export async function applyLocalSkillImport(
 }
 
 /** Undo only an unchanged import; move it aside for recovery instead of deleting it. */
-export async function undoLocalSkillImport(applied: AppliedSkillImport): Promise<string> {
+export async function verifyAppliedSkillImport(applied: AppliedSkillImport): Promise<void> {
   const destination = applied.receipt.destinationDirectory;
   if (path.dirname(destination) !== applied.destinationRoot) {
     throw new Error("The import receipt is outside its original destination.");
@@ -186,11 +187,26 @@ export async function undoLocalSkillImport(applied: AppliedSkillImport): Promise
   if (!sameFiles(await enumerateFiles(destination), applied.files)) {
     throw new Error("The imported skill has changed. Undo was stopped to preserve those changes.");
   }
-  await requireSameDirectory(destination, applied.destinationIdentity);
-  const recovery = path.join(
+}
+
+/** Undo only an unchanged import; move it aside for recovery instead of deleting it. */
+export async function undoLocalSkillImport(
+  applied: AppliedSkillImport,
+  recovery: string = path.join(
     applied.destinationRoot,
-    `.skillmanager-recovery-${path.basename(destination)}-${randomUUID()}`,
-  );
+    `.skillmanager-recovery-${path.basename(applied.receipt.destinationDirectory)}-${randomUUID()}`,
+  ),
+): Promise<string> {
+  await verifyAppliedSkillImport(applied);
+  const destination = applied.receipt.destinationDirectory;
+  if (
+    path.dirname(recovery) !== applied.destinationRoot ||
+    !path.basename(recovery).startsWith(".skillmanager-recovery-") ||
+    (await exists(recovery))
+  ) {
+    throw new Error("The recovery location is not safe or is already in use.");
+  }
+  await requireSameDirectory(destination, applied.destinationIdentity);
   await fs.rename(destination, recovery);
   return recovery;
 }

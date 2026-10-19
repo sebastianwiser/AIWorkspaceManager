@@ -36,7 +36,7 @@ truth for what a user can run now.
 | MVP 2D               | Read-only application/project/plugin/skill/MCP relationships with evidence-aware cross-app links.                                                             |
 | Pillar 3A–3B         | Shared structural and static security audit, controlled findings, and partial/not-evaluated coverage.                                                         |
 | Security gate        | Desktop request validation, bounded bundle inspection, local file-change fingerprints, tests, and GitHub security workflow.                                   |
-| Pillar 4 first slice | Additive local skill-folder import with preview, native confirmation, staged verification, and same-session recovery-based undo.                              |
+| Pillar 4 first slice | Additive local skill-folder import with preview, native confirmation, staged verification, persistent history, and recovery-based undo.                       |
 
 MVP 2B (live MCP status) was deferred because it would start or contact a server. Audit remains
 static and does not quietly introduce this behavior.
@@ -46,9 +46,9 @@ static and does not quietly introduce this behavior.
 These are dependency-ordered candidates, not promised release dates. Each needs its own design and
 tests before being called shipped.
 
-1. **Harden the first import in real use.** Improve diagnostics and recovery guidance, exercise more
-   fault-injection and concurrency cases, and validate behavior across supported macOS setups. Keep
-   folder import additive while it is being proven.
+1. **Harden the first import in real use.** Exercise more fault-injection and concurrency cases,
+   improve guidance for interrupted operations, and validate behavior across supported macOS setups.
+   Keep folder import additive while it is being proven.
 2. **Extend source and action support deliberately.** Archive import, project-local targets,
    updates, disable/remove, and plugin/MCP management each need separate source validation,
    previews, compatibility checks, and recovery plans. Remote downloads and command execution need

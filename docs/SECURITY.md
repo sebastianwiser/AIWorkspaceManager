@@ -84,9 +84,15 @@ Import is intentionally narrower than general package installation:
 4. Apply revalidates source file hashes and destination state, stages a private copy, verifies the
    stage, creates the destination exclusively, copies files without overwriting, and verifies the
    result. No imported script is run.
-5. If a partial destination was created and an error occurs, the app tries to move it into a hidden
-   recovery folder. An unchanged successful import can be undone during the same session by moving
-   it to recovery. Undo refuses to discard later edits.
+5. Before copying, a versioned local journal records the import intent. After verification, it
+   records destination identity and file hashes. On startup and in the Import view, records are
+   reconciled with current files; only unchanged completed imports can be undone across restarts.
+   The journal is bounded, written through a private temporary file and rename, and rejects linked,
+   malformed, or out-of-scope records rather than resetting them.
+6. If a partial destination was created and an error occurs, the app tries to move it into a hidden
+   recovery folder. Undo records its intended recovery path before moving an unchanged folder.
+   Interrupted actions remain marked for manual review and are never automatically retried or
+   deleted. Undo refuses to discard later edits.
 
 Import is not a sandbox for the skill after another AI application uses it. A skill may contain
 instructions or scripts that the target application later interprets or runs. Review the source
@@ -101,10 +107,11 @@ can mutate, is not recommended.
 ## Development and repository controls
 
 Automated tests cover bounded reads, symlinks, redaction, incomplete scans, import drift,
-overwrites, and recovery. CI runs tests, type checks, lint, formatting, and builds on macOS and
-Ubuntu. The Security workflow runs CodeQL and pull-request dependency review; Dependabot proposes
-weekly npm and GitHub Action updates. These files do not enable GitHub repository-level secret
-scanning or push protection; a repository administrator must configure those separately.
+overwrites, restart recovery, malformed history, and interruption. CI runs tests, type checks, lint,
+formatting, and builds on macOS and Ubuntu. The Security workflow runs CodeQL and pull-request
+dependency review; Dependabot proposes weekly npm and GitHub Action updates. These files do not
+enable GitHub repository-level secret scanning or push protection; a repository administrator must
+configure those separately.
 
 If you find a vulnerability, do not include tokens, private configuration, or personal paths in a
 public issue. Use GitHub's private vulnerability reporting if the repository has it enabled.

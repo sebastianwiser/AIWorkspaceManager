@@ -24,9 +24,9 @@ import {
   applyLocalSkillImport,
   planLocalSkillImport,
   undoLocalSkillImport,
-  type AppliedSkillImport,
   type SkillImportPlan,
 } from "../management/import-skill.js";
+import { ImportHistory } from "../management/history.js";
 import { readSkillContent, type ExpectedFileIdentity } from "../skill-content.js";
 import type {
   ApplicationId,
@@ -35,6 +35,7 @@ import type {
   SkillContentResult,
   SkillImportReceipt,
   SkillImportSelection,
+  SkillImportHistoryEntry,
 } from "../types.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -47,12 +48,32 @@ const RESET_BASELINE_CHANNEL = "inventory:reset-baseline";
 const CHOOSE_IMPORT_CHANNEL = "management:choose-skill-import";
 const APPLY_IMPORT_CHANNEL = "management:apply-skill-import";
 const UNDO_IMPORT_CHANNEL = "management:undo-skill-import";
+const LIST_IMPORT_HISTORY_CHANNEL = "management:list-skill-import-history";
 
 let allowedInstructionFiles = new Map<string, ExpectedFileIdentity>();
 let latestSnapshot: InventorySnapshot | null = null;
 let pendingImport: SkillImportPlan | null = null;
-let appliedImport: AppliedSkillImport | null = null;
+let importHistory: ImportHistory;
+let managementBusy = false;
 const trustedWindows = new Set<InstanceType<typeof BrowserWindow>>();
+
+function destinationRootFor(application: ApplicationId): string {
+  const root = getApplication(application).locations.find(
+    (location) => location.source === "default" && location.scope === "global",
+  )?.path;
+  if (!root) throw new Error("This application has no supported skill location.");
+  return root;
+}
+
+async function withManagementLock<T>(action: () => Promise<T>): Promise<T> {
+  if (managementBusy) throw new Error("Another skill import action is already in progress.");
+  managementBusy = true;
+  try {
+    return await action();
+  } finally {
+    managementBusy = false;
+  }
+}
 
 function requireTrustedWindow(
   event: Electron.IpcMainInvokeEvent,
@@ -213,21 +234,19 @@ function registerHandlers(): void {
       if (application !== "chatgpt" && application !== "claude") {
         throw new Error("Choose a supported application.");
       }
-      const selected = await dialog.showOpenDialog(window, {
-        title: "Choose a local skill folder",
-        properties: ["openDirectory"],
+      return withManagementLock(async () => {
+        const selected = await dialog.showOpenDialog(window, {
+          title: "Choose a local skill folder",
+          properties: ["openDirectory"],
+        });
+        if (selected.canceled || selected.filePaths.length !== 1) return { status: "cancelled" };
+        pendingImport = await planLocalSkillImport(
+          selected.filePaths[0],
+          destinationRootFor(application),
+          application,
+        );
+        return { status: "ready", preview: pendingImport.preview };
       });
-      if (selected.canceled || selected.filePaths.length !== 1) return { status: "cancelled" };
-      const destinationRoot = getApplication(application as ApplicationId).locations.find(
-        (location) => location.source === "default" && location.scope === "global",
-      )?.path;
-      if (!destinationRoot) throw new Error("This application has no supported skill location.");
-      pendingImport = await planLocalSkillImport(
-        selected.filePaths[0],
-        destinationRoot,
-        application,
-      );
-      return { status: "ready", preview: pendingImport.preview };
     },
   );
 
@@ -238,41 +257,53 @@ function registerHandlers(): void {
       if (typeof planId !== "string" || pendingImport?.preview.id !== planId) {
         throw new Error("That import preview is no longer current.");
       }
-      const plan = pendingImport;
-      const confirmation = await dialog.showMessageBox(window, {
-        type: "warning",
-        buttons: ["Cancel", "Import skill"],
-        defaultId: 0,
-        cancelId: 0,
-        message: "Import this local skill?",
-        detail: `From: ${plan.preview.sourceDirectory}\nTo: ${plan.preview.destinationDirectory}\n${plan.preview.fileCount} files. No scripts will be run.${plan.preview.includesScripts ? " This skill contains scripts that its AI application may run later." : ""}`,
+      return withManagementLock(async () => {
+        const plan = pendingImport!;
+        const confirmation = await dialog.showMessageBox(window, {
+          type: "warning",
+          buttons: ["Cancel", "Import skill"],
+          defaultId: 0,
+          cancelId: 0,
+          message: "Import this local skill?",
+          detail: `From: ${plan.preview.sourceDirectory}\nTo: ${plan.preview.destinationDirectory}\n${plan.preview.fileCount} files. No scripts will be run.${plan.preview.includesScripts ? " This skill contains scripts that its AI application may run later." : ""}`,
+        });
+        if (confirmation.response !== 1) return null;
+        await importHistory.beginImport(plan);
+        pendingImport = null;
+        const result = await applyLocalSkillImport(plan, Date.now(), plan.preview.id);
+        await importHistory.finishImport(result);
+        return result.receipt;
       });
-      if (confirmation.response !== 1) return null;
-      const result = await applyLocalSkillImport(plan);
-      pendingImport = null;
-      appliedImport = result;
-      return result.receipt;
     },
   );
 
   ipcMain.handle(UNDO_IMPORT_CHANNEL, async (event, receiptId: unknown): Promise<string | null> => {
     const window = requireTrustedWindow(event);
-    if (typeof receiptId !== "string" || appliedImport?.receipt.id !== receiptId) {
-      throw new Error("That import is not available to undo in this session.");
-    }
-    const confirmation = await dialog.showMessageBox(window, {
-      type: "warning",
-      buttons: ["Cancel", "Move to recovery"],
-      defaultId: 0,
-      cancelId: 0,
-      message: "Undo this skill import?",
-      detail:
-        "The imported folder will be moved to a hidden recovery folder, not deleted. Undo stops if the skill changed after import.",
+    if (typeof receiptId !== "string") throw new Error("Choose a recorded import to undo.");
+    return withManagementLock(async () => {
+      const entry = (await importHistory.list()).find((item) => item.id === receiptId);
+      if (!entry || entry.status !== "unchanged") {
+        throw new Error("This import is no longer unchanged or available to undo.");
+      }
+      const confirmation = await dialog.showMessageBox(window, {
+        type: "warning",
+        buttons: ["Cancel", "Move to recovery"],
+        defaultId: 0,
+        cancelId: 0,
+        message: "Undo this skill import?",
+        detail: `Move ${entry.destinationDirectory} to a hidden recovery folder? No files will be deleted. Undo stops if the skill changed after import.`,
+      });
+      if (confirmation.response !== 1) return null;
+      const { applied, recovery } = await importHistory.prepareUndo(receiptId);
+      await undoLocalSkillImport(applied, recovery);
+      await importHistory.finishUndo(receiptId, recovery);
+      return recovery;
     });
-    if (confirmation.response !== 1) return null;
-    const recovery = await undoLocalSkillImport(appliedImport);
-    appliedImport = null;
-    return recovery;
+  });
+
+  ipcMain.handle(LIST_IMPORT_HISTORY_CHANNEL, async (event): Promise<SkillImportHistoryEntry[]> => {
+    requireTrustedWindow(event);
+    return importHistory.list();
   });
 }
 
@@ -311,8 +342,14 @@ function createWindow() {
 app.setName("SkillManagerOS");
 
 void app.whenReady().then(() => {
+  importHistory = new ImportHistory(
+    path.join(app.getPath("userData"), "skillmanager", "import-history.json"),
+    destinationRootFor,
+  );
+  // Reconcile on startup without changing files or silently retrying an import.
   registerHandlers();
   createWindow();
+  void importHistory.list().catch(() => undefined);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

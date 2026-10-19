@@ -11,6 +11,7 @@ test("management view explains its narrow, confirmed, recoverable import", () =>
   assert.match(html, /Add to ChatGPT/);
   assert.match(html, /Add to Claude/);
   assert.match(html, /never replaced/);
-  assert.match(html, /Undo this import|undo it while this app session stays open/);
+  assert.match(html, /even after restarting the app/);
+  assert.match(html, /Import history/);
   assert.match(html, /Archives, overwrites, updates, and automatic setup/);
 });

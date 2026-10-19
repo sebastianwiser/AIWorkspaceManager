@@ -33,7 +33,7 @@ npm run scan -- --app all
 | Plugins          | Filter local bundles by application, project, and manifest status. Inspect version, publisher, scope, installation evidence, provenance, and packaged components.                                                                                              |
 | Relationships    | Browse the application → global/project → plugin → skill/MCP map. Inspect cross-app links and their evidence. Packaged MCP declarations are separate from configured servers unless their exact local identities match.                                        |
 | Audit            | Review static findings by application, category, severity, or text. Open an affected item, examine partial-check coverage and potential access, and see changed inspected files since the prior scan.                                                          |
-| Import           | Choose a local skill folder and target application, inspect the exact destination and script warning, then confirm the native dialog. Same-session undo moves an unchanged import into a recovery folder.                                                      |
+| Import           | Choose a local skill folder and target application, inspect the exact destination and script warning, then confirm the native dialog. Saved history lets you move an unchanged import into a recovery folder after restarting.                                 |
 
 Use **Rescan** after changing local application files. A missing optional directory is normal;
 inaccessible or malformed expected sources appear as diagnostics. The first successful desktop scan
@@ -148,10 +148,17 @@ location only. The folder name becomes the destination name. The preview is time
 rejects existing destinations and changed sources before copying. The native confirmation repeats
 source, destination, file count, and script warning. No script is run.
 
-Only the most recent import can be undone in the current app session. Undo stops if its files
-changed; otherwise the folder is moved to a hidden `.skillmanager-recovery-*` folder in the same
-skills root. It is not deleted. The app ignores recovery folders during discovery. Archives,
-downloads, project installs, overwrites, updates, and CLI import are not supported. See the
+The Import view shows saved history across app restarts. Each record is checked against the current
+folder before **Move to recovery** is offered. Undo stops if files or directory identity changed;
+otherwise the folder is moved to a hidden `.skillmanager-recovery-*` folder in the same skills root.
+It is not deleted. The app ignores recovery folders during discovery. Missing or changed folders
+remain visible but cannot be undone. An interrupted import or undo is marked **Needs review** and is
+never silently retried; inspect the shown destination and recovery paths before acting manually. An
+unreadable or invalid history file is preserved and blocks new imports until repaired. The local
+history file is under the app's user-data directory at `skillmanager/import-history.json` and stores
+paths, file hashes, and timestamps, not skill contents. History is capped at 100 records; a full
+journal stops new imports rather than discarding old recovery evidence. Archives, downloads, project
+installs, overwrites, updates, and CLI import are not supported. See the
 [security model](SECURITY.md) for file limits and the full trust boundary.
 
 ## Troubleshooting
