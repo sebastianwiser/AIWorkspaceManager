@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { readRegularFileBounded } from "../safe-file.js";
+import { analyzeInstructionText } from "../audit/instructions.js";
 import type { ApplicationId, SkillImportPreview, SkillImportReceipt } from "../types.js";
 
 const MAX_FILES = 128;
@@ -58,7 +59,15 @@ export async function planLocalSkillImport(
   if (await exists(destinationDirectory)) {
     throw new Error("A skill folder with this name already exists. Nothing will be overwritten.");
   }
-  const files = await enumerateFiles(source);
+  const instructionRisks: SkillImportPreview["instructionRisks"] = [];
+  let instructionRiskCount = 0;
+  const files = await enumerateFiles(source, (relativePath, data) => {
+    if (!/\.(?:md|txt)$/i.test(relativePath)) return;
+    for (const match of analyzeInstructionText(data.toString("utf8"))) {
+      instructionRiskCount += 1;
+      if (instructionRisks.length < 12) instructionRisks.push({ ...match, relativePath });
+    }
+  });
   if (!files.some((item) => item.relativePath === "SKILL.md")) {
     throw new Error("Select a skill folder containing a top-level SKILL.md file.");
   }
@@ -71,6 +80,8 @@ export async function planLocalSkillImport(
       fileCount: files.length,
       totalBytes: files.reduce((total, item) => total + item.bytes, 0),
       includesScripts: files.some((item) => SCRIPT_EXTENSION.test(item.relativePath)),
+      instructionRiskCount,
+      instructionRisks,
       expiresAt: new Date(now + PLAN_LIFETIME_MS).toISOString(),
     },
     destinationRoot: root,
@@ -85,7 +96,21 @@ export async function applyLocalSkillImport(
   plan: SkillImportPlan,
   now = Date.now(),
   receiptId: string = randomUUID(),
+  recoveryDirectory = createSkillRecoveryPath(
+    plan.destinationRoot,
+    plan.preview.destinationDirectory,
+  ),
+  copyFile: typeof fs.copyFile = fs.copyFile,
 ): Promise<AppliedSkillImport> {
+  if (
+    !isValidSkillRecoveryPath(
+      plan.destinationRoot,
+      plan.preview.destinationDirectory,
+      recoveryDirectory,
+    )
+  ) {
+    throw new Error("The recovery location is not safe.");
+  }
   if (now >= Date.parse(plan.preview.expiresAt)) {
     throw new Error("This preview expired. Select the skill folder again.");
   }
@@ -137,7 +162,7 @@ export async function applyLocalSkillImport(
       const targetFile = path.join(plan.preview.destinationDirectory, entry.relativePath);
       await fs.mkdir(path.dirname(targetFile), { recursive: true, mode: 0o700 });
       await requireDirectoryChain(plan.preview.destinationDirectory, path.dirname(targetFile));
-      await fs.copyFile(path.join(stage, entry.relativePath), targetFile, constants.COPYFILE_EXCL);
+      await copyFile(path.join(stage, entry.relativePath), targetFile, constants.COPYFILE_EXCL);
     }
     if (!sameFiles(await enumerateFiles(plan.preview.destinationDirectory), plan.files)) {
       throw new Error("The imported files could not be verified. Review the destination manually.");
@@ -159,14 +184,16 @@ export async function applyLocalSkillImport(
   } catch (error) {
     if (createdDestination && !committed) {
       try {
+        await requireSameDirectory(plan.destinationRoot, destinationIdentity);
         await requireSameDirectory(plan.preview.destinationDirectory, createdDestination);
-        await fs.rename(
-          plan.preview.destinationDirectory,
-          path.join(plan.destinationRoot, `.skillmanager-recovery-${randomUUID()}`),
-        );
-      } catch {
+        if (await exists(recoveryDirectory)) {
+          throw new Error("Recovery folder already exists.", { cause: error });
+        }
+        await fs.rename(plan.preview.destinationDirectory, recoveryDirectory);
+      } catch (recoveryError) {
         throw new Error(
           "Import failed and the destination changed during recovery. Review it manually.",
+          { cause: recoveryError },
         );
       }
     }
@@ -192,26 +219,47 @@ export async function verifyAppliedSkillImport(applied: AppliedSkillImport): Pro
 /** Undo only an unchanged import; move it aside for recovery instead of deleting it. */
 export async function undoLocalSkillImport(
   applied: AppliedSkillImport,
-  recovery: string = path.join(
-    applied.destinationRoot,
-    `.skillmanager-recovery-${path.basename(applied.receipt.destinationDirectory)}-${randomUUID()}`,
-  ),
+  recovery = createSkillRecoveryPath(applied.destinationRoot, applied.receipt.destinationDirectory),
 ): Promise<string> {
   await verifyAppliedSkillImport(applied);
   const destination = applied.receipt.destinationDirectory;
   if (
-    path.dirname(recovery) !== applied.destinationRoot ||
-    !path.basename(recovery).startsWith(".skillmanager-recovery-") ||
+    !isValidSkillRecoveryPath(applied.destinationRoot, destination, recovery) ||
     (await exists(recovery))
   ) {
     throw new Error("The recovery location is not safe or is already in use.");
   }
+  await requireSameDirectory(applied.destinationRoot, applied.destinationRootIdentity);
   await requireSameDirectory(destination, applied.destinationIdentity);
   await fs.rename(destination, recovery);
   return recovery;
 }
 
-async function enumerateFiles(root: string): Promise<PlannedFile[]> {
+/** Allocate a unique, direct-child recovery path before changing the destination. */
+export function createSkillRecoveryPath(root: string, destination: string): string {
+  return path.join(root, `.skillmanager-recovery-${path.basename(destination)}-${randomUUID()}`);
+}
+
+export function isValidSkillRecoveryPath(
+  root: string,
+  destination: string,
+  recovery: string,
+): boolean {
+  const prefix = `.skillmanager-recovery-${path.basename(destination)}-`;
+  return (
+    path.dirname(destination) === root &&
+    path.dirname(recovery) === root &&
+    path.basename(recovery).startsWith(prefix) &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+      path.basename(recovery).slice(prefix.length),
+    )
+  );
+}
+
+async function enumerateFiles(
+  root: string,
+  onFile?: (relativePath: string, data: Buffer) => void,
+): Promise<PlannedFile[]> {
   const files: PlannedFile[] = [];
   let totalBytes = 0;
   const walk = async (directory: string, depth: number): Promise<void> => {
@@ -239,8 +287,10 @@ async function enumerateFiles(root: string): Promise<PlannedFile[]> {
         if (totalBytes > MAX_TOTAL_BYTES)
           throw new Error("The skill folder exceeds the import size limit.");
         const data = await readRegularFileBounded(absolute, MAX_FILE_BYTES);
+        const relativePath = path.relative(root, absolute);
+        onFile?.(relativePath, data);
         files.push({
-          relativePath: path.relative(root, absolute),
+          relativePath,
           bytes: data.length,
           sha256: digest(data),
         });

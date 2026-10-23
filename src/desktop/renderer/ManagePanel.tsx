@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
-import type { ApplicationId, SkillImportHistoryEntry, SkillImportPreview } from "../../types.js";
+import type {
+  ApplicationId,
+  InstructionRiskSignal,
+  SkillImportHistoryEntry,
+  SkillImportPreview,
+} from "../../types.js";
 import { AlertIcon, ShieldIcon } from "./Icons.js";
+
+const instructionRiskLabels: Record<InstructionRiskSignal, string> = {
+  "instruction-authority-override": "Possible authority spoofing",
+  "instruction-concealed-action": "Possible hidden action",
+  "instruction-private-data-egress": "Possible outward transfer of private data",
+};
 
 export function ManagePanel({ onChanged }: { onChanged: () => Promise<void> }) {
   const [preview, setPreview] = useState<SkillImportPreview | null>(null);
@@ -153,8 +164,11 @@ export function ManagePanel({ onChanged }: { onChanged: () => Promise<void> }) {
                     application may run them when the skill is used.
                   </p>
                 )}
+                {preview.instructionRiskCount > 0 && <ImportRiskNotice preview={preview} />}
                 <button type="button" disabled={busy} onClick={() => void apply()}>
-                  Review confirmation and import
+                  {preview.instructionRiskCount > 0
+                    ? "Review warnings and confirm import"
+                    : "Review confirmation and import"}
                 </button>
               </div>
             ) : (
@@ -224,7 +238,10 @@ export function ManagePanel({ onChanged }: { onChanged: () => Promise<void> }) {
                   <p className="manage-history-note">{statusMessage(entry)}</p>
                 )}
                 {entry.recoveryDirectory && (
-                  <p className="manage-history-path">Recovery: {entry.recoveryDirectory}</p>
+                  <p className="manage-history-path">
+                    {entry.status === "recovered" ? "Recovery folder" : "Possible recovery folder"}:{" "}
+                    {entry.recoveryDirectory}
+                  </p>
                 )}
               </article>
             ))}
@@ -240,7 +257,32 @@ export function ManagePanel({ onChanged }: { onChanged: () => Promise<void> }) {
   );
 }
 
-function statusLabel(status: SkillImportHistoryEntry["status"]): string {
+export function ImportRiskNotice({ preview }: { preview: SkillImportPreview }) {
+  return (
+    <div className="manage-risk" role="alert">
+      <strong>
+        {preview.instructionRiskCount} possible AI-instruction risk
+        {preview.instructionRiskCount === 1 ? "" : "s"} to review
+      </strong>
+      <p>
+        These are static clues, not proof of an attack. Read the cited source files before
+        importing. A second native confirmation will be required.
+      </p>
+      <ul>
+        {preview.instructionRisks.map((risk, index) => (
+          <li key={`${risk.relativePath}:${risk.line}:${risk.signal}:${index}`}>
+            {instructionRiskLabels[risk.signal]} · {risk.relativePath}:{risk.line}
+          </li>
+        ))}
+      </ul>
+      {preview.instructionRiskCount > preview.instructionRisks.length && (
+        <p>Only the first {preview.instructionRisks.length} locations are shown.</p>
+      )}
+    </div>
+  );
+}
+
+export function statusLabel(status: SkillImportHistoryEntry["status"]): string {
   switch (status) {
     case "unchanged":
       return "Ready to undo";
@@ -255,14 +297,25 @@ function statusLabel(status: SkillImportHistoryEntry["status"]): string {
   }
 }
 
-function statusMessage(entry: SkillImportHistoryEntry): string {
+export function statusMessage(entry: SkillImportHistoryEntry): string {
   switch (entry.status) {
     case "changed":
       return "The imported folder no longer matches its saved record. Undo is disabled to protect changes.";
     case "missing":
       return "The imported folder is no longer at this location. No files were changed by this check.";
     case "needs-review":
-      return "This operation may have been interrupted or its recovery folder is missing. Review the paths manually; nothing will be retried automatically.";
+      switch (entry.reviewReason) {
+        case "incomplete-import":
+          return "Import did not reach verified completion. Check the destination and possible recovery folder before trying again; nothing is retried automatically.";
+        case "incomplete-undo":
+          return "Undo did not reach verified completion. Check whether the skill is at the destination or recovery folder before moving anything manually.";
+        case "recovery-missing":
+          return "The recorded recovery folder is missing or is no longer a regular folder. Nothing was changed by this check.";
+        case "access-error":
+          return "The destination could not be checked. Review its permissions and location before trying to undo.";
+        default:
+          return "Review the destination and recovery paths manually; nothing is retried automatically.";
+      }
     case "recovered":
       return "The original folder was moved aside, not deleted.";
     case "unchanged":

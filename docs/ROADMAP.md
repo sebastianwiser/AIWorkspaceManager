@@ -28,15 +28,16 @@ truth for what a user can run now.
 
 ## Shipped milestones
 
-| Milestone            | Current scope                                                                                                                                                 |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MVP 1A–1D            | Local and known-project skill discovery, safe metadata parsing, search/filtering, cross-app variants and diff, desktop inventory, and skill change detection. |
-| MVP 2A               | Read-only local MCP configuration discovery, sanitized display, validation, and filtering.                                                                    |
-| MVP 2C               | Plugin inventory with manifest provenance, installation-evidence labels, and packaged components.                                                             |
-| MVP 2D               | Read-only application/project/plugin/skill/MCP relationships with evidence-aware cross-app links.                                                             |
-| Pillar 3A–3B         | Shared structural and static security audit, controlled findings, and partial/not-evaluated coverage.                                                         |
-| Security gate        | Desktop request validation, bounded bundle inspection, local file-change fingerprints, tests, and GitHub security workflow.                                   |
-| Pillar 4 first slice | Additive local skill-folder import with preview, native confirmation, staged verification, persistent history, and recovery-based undo.                       |
+| Milestone             | Current scope                                                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MVP 1A–1D             | Local and known-project skill discovery, safe metadata parsing, search/filtering, cross-app variants and diff, desktop inventory, and skill change detection.                        |
+| MVP 2A                | Read-only local MCP configuration discovery, sanitized display, validation, and filtering.                                                                                           |
+| MVP 2C                | Plugin inventory with manifest provenance, installation-evidence labels, and packaged components.                                                                                    |
+| MVP 2D                | Read-only application/project/plugin/skill/MCP relationships with evidence-aware cross-app links.                                                                                    |
+| Pillar 3A–3B          | Shared structural and static security audit, controlled findings, and partial/not-evaluated coverage.                                                                                |
+| Security gate         | Desktop request validation, bounded bundle inspection, local file-change fingerprints, tests, and GitHub security workflow.                                                          |
+| Pillar 4 first slice  | Additive local skill-folder import with preview, native confirmation, staged verification, persistent history, recorded recovery paths, and recovery-based undo.                     |
+| AI safety first slice | Heuristic review of local skill/plugin Markdown and text for instruction override, concealed actions, and private-data transfer requests; flagged imports get an extra confirmation. |
 
 MVP 2B (live MCP status) was deferred because it would start or contact a server. Audit remains
 static and does not quietly introduce this behavior.
@@ -46,20 +47,25 @@ static and does not quietly introduce this behavior.
 These are dependency-ordered candidates, not promised release dates. Each needs its own design and
 tests before being called shipped.
 
-1. **Harden the first import in real use.** Exercise more fault-injection and concurrency cases,
-   improve guidance for interrupted operations, and validate behavior across supported macOS setups.
-   Keep folder import additive while it is being proven.
-2. **Extend source and action support deliberately.** Archive import, project-local targets,
+1. **Validate the first import in real use.** Automated fault-injection, journal migration,
+   single-instance coordination, and interrupted-operation guidance are in place. Complete hands-on
+   checks across supported macOS setups before treating this narrow import as broadly proven. Keep
+   folder import additive while it is being proven.
+2. **Extend AI-instruction coverage carefully.** Evaluate false positives and misses against benign
+   and adversarial fixtures, then consider project instructions and structured plugin prompts. Live
+   MCP descriptions, responses, and web content require separate opt-in runtime integrations; local
+   scanning must not claim to cover them.
+3. **Extend source and action support deliberately.** Archive import, project-local targets,
    updates, disable/remove, and plugin/MCP management each need separate source validation,
    previews, compatibility checks, and recovery plans. Remote downloads and command execution need
    explicit consent and their own threat model.
-3. **Add opt-in MCP health checks (MVP 2B).** A bounded, user-triggered status check must make
+4. **Add opt-in MCP health checks (MVP 2B).** A bounded, user-triggered status check must make
    process starts or network contact visible and controlled by timeouts. It must not be part of a
    read-only inventory scan.
-4. **Model a portable workspace.** Define a versioned manifest that separates shareable intent from
+5. **Model a portable workspace.** Define a versioned manifest that separates shareable intent from
    personal paths, tokens, and machine-specific state. Show dependencies, provenance, compatibility,
    conflicts, and a human-readable bill of materials before any apply action.
-5. **Share and adopt safely.** Export a sanitized definition, map it onto a receiving machine,
+6. **Share and adopt safely.** Export a sanitized definition, map it onto a receiving machine,
    preview exact changes, and apply only after confirmation with rollback and an activity record.
    Team review and policy can build on that model later.
 

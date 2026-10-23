@@ -7,8 +7,12 @@ export type SkillSourceId =
 
 export type SkillScope = "global" | "project";
 export type InventoryKind = "skills" | "mcp" | "plugins";
-export type AuditFamily = "structure" | "exposure" | "commands" | "provenance";
+export type AuditFamily = "structure" | "exposure" | "commands" | "provenance" | "instructions";
 export type AuditItemKind = "skill" | "mcp" | "plugin" | "source";
+export type InstructionRiskSignal =
+  | "instruction-authority-override"
+  | "instruction-concealed-action"
+  | "instruction-private-data-egress";
 export type AuditSignal =
   | "missing-file"
   | "unreadable-file"
@@ -25,7 +29,8 @@ export type AuditSignal =
   | "missing-resource"
   | "resource-symlink"
   | "resource-check-limited"
-  | "bundle-check-limited";
+  | "bundle-check-limited"
+  | InstructionRiskSignal;
 export type McpTransport = "stdio" | "http" | "sse" | "unknown";
 export type McpConfigurationFormat = "json" | "toml";
 export type McpStatus = "valid" | "invalid" | "duplicate";
@@ -177,6 +182,15 @@ export interface AuditFileChange {
   file: AuditFileRecord;
 }
 
+export type AuditExcerptResult =
+  | {
+      ok: true;
+      sourceFile: string;
+      highlightedLine: number;
+      lines: Array<{ number: number; text: string; truncated: boolean }>;
+    }
+  | { ok: false; error: string };
+
 /** A narrowly scoped, local-folder skill import. Plans contain no file contents. */
 export interface SkillImportPreview {
   id: string;
@@ -186,6 +200,12 @@ export interface SkillImportPreview {
   fileCount: number;
   totalBytes: number;
   includesScripts: boolean;
+  instructionRiskCount: number;
+  instructionRisks: Array<{
+    signal: InstructionRiskSignal;
+    relativePath: string;
+    line: number;
+  }>;
   expiresAt: string;
 }
 
@@ -209,6 +229,7 @@ export interface SkillImportHistoryEntry {
   appliedAt: string | null;
   recoveryDirectory: string | null;
   status: "unchanged" | "changed" | "missing" | "needs-review" | "recovered";
+  reviewReason?: "incomplete-import" | "incomplete-undo" | "recovery-missing" | "access-error";
 }
 
 export interface DiscoveredMcpServer {
@@ -335,6 +356,7 @@ export type SkillContentResult = ({ ok: true } & SkillContent) | { ok: false; er
 export interface DesktopApi {
   scan(): Promise<DesktopScanResult>;
   readSkillContent(instructionFile: string): Promise<SkillContentResult>;
+  readAuditExcerpt(findingId: string): Promise<AuditExcerptResult>;
   resetBaseline(): Promise<InventoryChanges>;
   chooseSkillImport(application: ApplicationId): Promise<SkillImportSelection>;
   applySkillImport(planId: string): Promise<SkillImportReceipt | null>;

@@ -28,19 +28,19 @@ Electron main ──────┘                                   │
 
 ## Repository map
 
-| Area                                                                      | Responsibility                                                                                 |
-| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `src/applications.ts`, `src/projects.ts`                                  | Supported applications, default locations, registered projects, and project-local skill roots. |
-| `src/scanner.ts`, `src/metadata.ts`, `src/safe-file.ts`                   | Bounded traversal, frontmatter parsing, and no-follow bounded file access.                     |
-| `src/mcp.ts`, `src/plugins.ts`                                            | Local MCP configuration and plugin manifest adapters.                                          |
-| `src/inventory-scan.ts`, `src/inventory.ts`                               | Shared scan composition, filtering, searching, and sorting.                                    |
-| `src/capabilities.ts`, `src/relationships.ts`                             | Evidence-aware cross-app candidates and the application/project/plugin/component map.          |
-| `src/changes.ts`                                                          | Skill inventory snapshots and baseline comparison.                                             |
-| `src/audit/collect.ts`, `src/audit/index.ts`, `src/audit/integrity.ts`    | Sanitized bounded evidence, pure audit rules and coverage, file fingerprints and comparison.   |
-| `src/management/import-skill.ts`                                          | Additive local skill-folder plan, staging, verification, and recoverable undo.                 |
-| `src/management/history.ts`                                               | Versioned import journal, restart reconciliation, and saved undo state.                        |
-| `src/desktop/main.ts`, `src/desktop/preload.cts`, `src/desktop/renderer/` | Trusted desktop process, narrow bridge, and React interface.                                   |
-| `src/cli.ts`, `src/types.ts`, `test/`                                     | CLI contract, shared types, and module-aligned tests.                                          |
+| Area                                                                                                                        | Responsibility                                                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/applications.ts`, `src/projects.ts`                                                                                    | Supported applications, default locations, registered projects, and project-local skill roots.                                              |
+| `src/scanner.ts`, `src/metadata.ts`, `src/safe-file.ts`                                                                     | Bounded traversal, frontmatter parsing, and no-follow bounded file access.                                                                  |
+| `src/mcp.ts`, `src/plugins.ts`                                                                                              | Local MCP configuration and plugin manifest adapters.                                                                                       |
+| `src/inventory-scan.ts`, `src/inventory.ts`                                                                                 | Shared scan composition, filtering, searching, and sorting.                                                                                 |
+| `src/capabilities.ts`, `src/relationships.ts`                                                                               | Evidence-aware cross-app candidates and the application/project/plugin/component map.                                                       |
+| `src/changes.ts`                                                                                                            | Skill inventory snapshots and baseline comparison.                                                                                          |
+| `src/audit/collect.ts`, `src/audit/instructions.ts`, `src/audit/excerpt.ts`, `src/audit/index.ts`, `src/audit/integrity.ts` | Sanitized bounded evidence, pure instruction heuristics and audit rules, explicit line preview, coverage, file fingerprints and comparison. |
+| `src/management/import-skill.ts`                                                                                            | Additive local skill-folder plan, staging, verification, and recoverable undo.                                                              |
+| `src/management/history.ts`                                                                                                 | Versioned import journal, restart reconciliation, and saved undo state.                                                                     |
+| `src/desktop/main.ts`, `src/desktop/preload.cts`, `src/desktop/renderer/`                                                   | Trusted desktop process, narrow bridge, and React interface.                                                                                |
+| `src/cli.ts`, `src/types.ts`, `test/`                                                                                       | CLI contract, shared types, and module-aligned tests.                                                                                       |
 
 Generated output in `dist/` is ignored; edit `src/` and run the build instead.
 
@@ -63,6 +63,15 @@ per-application/category coverage. Matched credential values and commands do not
 findings. `src/audit/integrity.ts` compares the desktop's inspected-file snapshot; uncertain scans
 do not claim file removals.
 
+`src/audit/instructions.ts` is a pure, bounded-by-input heuristic shared by audit collection and
+local skill-import planning. It returns only controlled signal codes and nearby line numbers for
+selected Markdown/text files; it does not return matched text. Import previews carry a capped list
+of these signals, and Electron main adds a native review prompt before normal confirmation when any
+are present. The selected skill's file hashes are still rechecked before apply. The desktop's
+separate line-preview request accepts only a current audit finding ID. The trusted main process
+checks its source against an audited file record and fingerprint before returning a small excerpt to
+the renderer. Regular scan results never include source lines.
+
 The desktop keeps two separate local comparisons: `src/changes.ts` tracks skill definitions, while
 `src/audit/integrity.ts` tracks inspected bundle files. A new scan may advance a baseline only when
 its relevant completeness conditions allow it. Resetting the skill baseline does not alter source
@@ -74,11 +83,13 @@ The only write path is the local skill-folder Import action. The renderer suppli
 application and an opaque preview ID, not an arbitrary destination path. Electron main chooses the
 known global skills root, collects a native folder selection, builds a time-limited plan, and
 requires a second native confirmation. Apply rechecks hashes and directory identity, copies through
-a private stage, and verifies the result. A versioned journal records intent before the copy,
-completion after verification, and recovery intent before undo. Startup and UI reads reconcile each
-record with the filesystem without retrying interrupted actions. Undo moves an unchanged import to
-recovery, including after restart. Future archive, update, remove, plugin, or MCP operations need
-separate planners and safety tests; they must not be smuggled into this action.
+a private stage, and verifies the result. A versioned journal records intent and a possible recovery
+path before the copy, completion after verification, and recovery intent before undo. Startup and UI
+reads reconcile each record with the filesystem without retrying interrupted actions. Undo moves an
+unchanged import to recovery, including after restart. Electron's single-instance lock prevents
+concurrent desktop processes from independently mutating that journal. Future archive, update,
+remove, plugin, or MCP operations need separate planners and safety tests; they must not be smuggled
+into this action.
 
 The [security model](SECURITY.md) documents what these checks do and do not protect against. The
 [architecture decision](decisions/0001-audit-and-management-architecture.md) records the original

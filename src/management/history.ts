@@ -4,13 +4,15 @@ import path from "node:path";
 import { readRegularFileBounded } from "../safe-file.js";
 import type { ApplicationId, SkillImportHistoryEntry } from "../types.js";
 import {
+  createSkillRecoveryPath,
+  isValidSkillRecoveryPath,
   verifyAppliedSkillImport,
   type AppliedSkillImport,
   type PlannedFile,
   type SkillImportPlan,
 } from "./import-skill.js";
 
-const VERSION = 1;
+const VERSION = 2;
 const MAX_ENTRIES = 100;
 const MAX_JOURNAL_BYTES = 8 * 1024 * 1024;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -37,7 +39,7 @@ interface ImportRecord {
 }
 
 interface Journal {
-  version: 1;
+  version: 2;
   entries: ImportRecord[];
 }
 
@@ -57,7 +59,7 @@ export class ImportHistory {
     return entries;
   }
 
-  async beginImport(plan: SkillImportPlan): Promise<void> {
+  async beginImport(plan: SkillImportPlan): Promise<string> {
     const journal = await this.read();
     if (journal.entries.length >= MAX_ENTRIES) {
       throw new Error("Import history is full. No files were imported.");
@@ -65,6 +67,10 @@ export class ImportHistory {
     if (journal.entries.some((entry) => entry.id === plan.preview.id)) {
       throw new Error("This import is already recorded.");
     }
+    const recovery = createSkillRecoveryPath(
+      plan.destinationRoot,
+      plan.preview.destinationDirectory,
+    );
     const entry: ImportRecord = {
       id: plan.preview.id,
       application: plan.preview.application,
@@ -76,11 +82,12 @@ export class ImportHistory {
       files: plan.files,
       destinationRootIdentity: null,
       destinationIdentity: null,
-      recoveryDirectory: null,
+      recoveryDirectory: recovery,
     };
     this.validateEntry(entry);
     journal.entries.push(entry);
     await this.write(journal);
+    return recovery;
   }
 
   async finishImport(applied: AppliedSkillImport): Promise<void> {
@@ -99,6 +106,7 @@ export class ImportHistory {
     entry.appliedAt = applied.receipt.appliedAt;
     entry.destinationRootIdentity = applied.destinationRootIdentity;
     entry.destinationIdentity = applied.destinationIdentity;
+    entry.recoveryDirectory = null;
     await this.write(journal);
   }
 
@@ -108,10 +116,7 @@ export class ImportHistory {
     if (entry.state !== "applied") throw new Error("This import is not available to undo.");
     const applied = this.toApplied(entry);
     await verifyAppliedSkillImport(applied);
-    const recovery = path.join(
-      entry.destinationRoot,
-      `.skillmanager-recovery-${path.basename(entry.destinationDirectory)}-${randomUUID()}`,
-    );
+    const recovery = createSkillRecoveryPath(entry.destinationRoot, entry.destinationDirectory);
     entry.state = "undoing";
     entry.recoveryDirectory = recovery;
     await this.write(journal);
@@ -138,8 +143,11 @@ export class ImportHistory {
       appliedAt: entry.appliedAt,
       recoveryDirectory: entry.recoveryDirectory,
     };
-    if (entry.state === "applying" || entry.state === "undoing") {
-      return { ...base, status: "needs-review" };
+    if (entry.state === "applying") {
+      return { ...base, status: "needs-review", reviewReason: "incomplete-import" };
+    }
+    if (entry.state === "undoing") {
+      return { ...base, status: "needs-review", reviewReason: "incomplete-undo" };
     }
     if (entry.state === "recovered") {
       try {
@@ -147,16 +155,19 @@ export class ImportHistory {
         return {
           ...base,
           status: stats.isDirectory() && !stats.isSymbolicLink() ? "recovered" : "needs-review",
+          ...(stats.isDirectory() && !stats.isSymbolicLink()
+            ? {}
+            : { reviewReason: "recovery-missing" }),
         };
       } catch {
-        return { ...base, status: "needs-review" };
+        return { ...base, status: "needs-review", reviewReason: "recovery-missing" };
       }
     }
     let present: boolean;
     try {
       present = await exists(entry.destinationDirectory);
     } catch {
-      return { ...base, status: "needs-review" };
+      return { ...base, status: "needs-review", reviewReason: "access-error" };
     }
     if (!present) return { ...base, status: "missing" };
     try {
@@ -213,7 +224,7 @@ export class ImportHistory {
     }
     if (
       !isObject(parsed) ||
-      parsed.version !== VERSION ||
+      (parsed.version !== 1 && parsed.version !== VERSION) ||
       !Array.isArray(parsed.entries) ||
       parsed.entries.length > MAX_ENTRIES
     ) {
@@ -221,15 +232,15 @@ export class ImportHistory {
     }
     const ids = new Set<string>();
     for (const entry of parsed.entries) {
-      this.validateEntry(entry);
+      this.validateEntry(entry, parsed.version);
       if (ids.has(entry.id))
         throw new Error("Import history contains duplicate IDs. It was not changed.");
       ids.add(entry.id);
     }
-    return parsed as unknown as Journal;
+    return { version: VERSION, entries: parsed.entries as ImportRecord[] };
   }
 
-  private validateEntry(value: unknown): asserts value is ImportRecord {
+  private validateEntry(value: unknown, version: number = VERSION): asserts value is ImportRecord {
     if (!isObject(value)) throw invalid();
     const entry = value as Record<string, unknown>;
     const files = entry.files;
@@ -263,7 +274,15 @@ export class ImportHistory {
         entry.appliedAt !== null ||
         entry.destinationRootIdentity !== null ||
         entry.destinationIdentity !== null ||
-        entry.recoveryDirectory !== null
+        (version === 1
+          ? entry.recoveryDirectory !== null
+          : entry.recoveryDirectory !== null &&
+            (typeof entry.recoveryDirectory !== "string" ||
+              !isValidSkillRecoveryPath(
+                entry.destinationRoot as string,
+                entry.destinationDirectory as string,
+                entry.recoveryDirectory,
+              )))
       )
         throw invalid();
     } else {
@@ -276,7 +295,12 @@ export class ImportHistory {
       if (entry.state === "applied" && entry.recoveryDirectory !== null) throw invalid();
       if (
         entry.state !== "applied" &&
-        !validRecovery(entry.recoveryDirectory, entry.destinationRoot as string)
+        (typeof entry.recoveryDirectory !== "string" ||
+          !isValidSkillRecoveryPath(
+            entry.destinationRoot as string,
+            entry.destinationDirectory as string,
+            entry.recoveryDirectory,
+          ))
       )
         throw invalid();
     }
@@ -349,14 +373,6 @@ function validFile(value: unknown): value is PlannedFile {
     Number(value.bytes) <= 2 * 1024 * 1024 &&
     typeof value.sha256 === "string" &&
     SHA256.test(value.sha256)
-  );
-}
-
-function validRecovery(value: unknown, root: string): value is string {
-  return (
-    typeof value === "string" &&
-    path.dirname(value) === root &&
-    /^\.skillmanager-recovery-[a-z0-9._-]+-[a-f0-9-]{36}$/i.test(path.basename(value))
   );
 }
 

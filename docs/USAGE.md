@@ -25,15 +25,15 @@ npm run scan -- --app all
 
 ## Desktop views
 
-| View             | How to use it                                                                                                                                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Skills           | Search and filter by application, project, source, and metadata status. Open a block to see local variants, their app/project connections, metadata, and a safe rendered or source-text `SKILL.md` preview. Compare two variants with the read-only line diff. |
-| Skills → Changes | Compare the current scan with the previous desktop baseline. Filter added, modified, moved, and removed skills. Resetting the baseline changes the comparison point, not a skill file.                                                                         |
-| MCP Servers      | Search by application and project. Select a server to inspect its transport, safe command or endpoint summary, configuration path, validation notes, and sanitized configuration excerpt.                                                                      |
-| Plugins          | Filter local bundles by application, project, and manifest status. Inspect version, publisher, scope, installation evidence, provenance, and packaged components.                                                                                              |
-| Relationships    | Browse the application → global/project → plugin → skill/MCP map. Inspect cross-app links and their evidence. Packaged MCP declarations are separate from configured servers unless their exact local identities match.                                        |
-| Audit            | Review static findings by application, category, severity, or text. Open an affected item, examine partial-check coverage and potential access, and see changed inspected files since the prior scan.                                                          |
-| Import           | Choose a local skill folder and target application, inspect the exact destination and script warning, then confirm the native dialog. Saved history lets you move an unchanged import into a recovery folder after restarting.                                 |
+| View             | How to use it                                                                                                                                                                                                                                                                                                                                 |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Skills           | Search and filter by application, project, source, and metadata status. Open a block to see local variants, their app/project connections, metadata, and a safe rendered or source-text `SKILL.md` preview. Compare two variants with the read-only line diff.                                                                                |
+| Skills → Changes | Compare the current scan with the previous desktop baseline. Filter added, modified, moved, and removed skills. Resetting the baseline changes the comparison point, not a skill file.                                                                                                                                                        |
+| MCP Servers      | Search by application and project. Select a server to inspect its transport, safe command or endpoint summary, configuration path, validation notes, and sanitized configuration excerpt.                                                                                                                                                     |
+| Plugins          | Filter local bundles by application, project, and manifest status. Inspect version, publisher, scope, installation evidence, provenance, and packaged components.                                                                                                                                                                             |
+| Relationships    | Browse the application → global/project → plugin → skill/MCP map. Inspect cross-app links and their evidence. Packaged MCP declarations are separate from configured servers unless their exact local identities match.                                                                                                                       |
+| Audit            | Review static findings by application, category, severity, or text, including possible AI-instruction risks in local text. Select **Inspect line** to see a flagged AI-instruction line and nearby context. Open an affected item, examine partial-check coverage and potential access, and see changed inspected files since the prior scan. |
+| Import           | Choose a local skill folder and target application, inspect the destination, scripts, and possible AI-instruction risks, then confirm. Flagged previews require an extra native review prompt. Unchanged imports can be moved to recovery after restarting.                                                                                   |
 
 Use **Rescan** after changing local application files. A missing optional directory is normal;
 inaccessible or malformed expected sources appear as diagnostics. The first successful desktop scan
@@ -136,17 +136,30 @@ fact.
 
 The Audit view uses heuristic, static checks for malformed definitions, duplicate or broken local
 references, credential-like patterns, risky commands, broad access, permissions, plaintext MCP URLs,
-hooks, and incomplete provenance. It also fingerprints bounded files in discovered skill and plugin
-bundles. An unreadable, oversized, linked, or uninspected source is marked as partial or not
-evaluated. Findings may be false positives; absence of findings is not proof of safety. Audit file
-changes are desktop-only and compare against the previous local audit baseline.
+hooks, and incomplete provenance. Its **AI instructions** category checks local Markdown/text in
+discovered skill and plugin bundles for authority-override, concealed-action, and private-data
+transfer patterns. Findings show controlled reasons and file/line locations, not the matched text.
+In the desktop Audit view, **Inspect line** explicitly reveals a short read-only excerpt for an
+AI-instruction warning. The cited line is highlighted. The app verifies that the local file still
+matches the audited fingerprint; if it changed, rescan before inspecting. This preview does not edit
+the file or mark the warning ignored. Source text may contain private information, so review it
+locally before sharing a screenshot. These patterns can flag harmless examples and miss more subtle
+attacks. The app does not inspect live MCP responses, web pages, messages, or the AI application's
+behavior. It also fingerprints bounded files in discovered bundles. An unreadable, oversized,
+linked, or uninspected source is marked as partial or not evaluated. Findings may be false
+positives; absence of findings is not proof of safety. Audit file changes are desktop-only and
+compare against the previous local audit baseline.
 
 ### Import and recovery
 
 Import accepts one local folder with a top-level `SKILL.md`, into a global ChatGPT or Claude skills
 location only. The folder name becomes the destination name. The preview is time-limited; the app
 rejects existing destinations and changed sources before copying. The native confirmation repeats
-source, destination, file count, and script warning. No script is run.
+source, destination, file count, and script warning. If local Markdown/text has possible
+AI-instruction risks, the preview lists the first flagged file/line locations and a separate native
+review prompt appears before import confirmation. These are warnings, not proof of an attack, and
+the app cannot prevent the target AI application from later following a skill's instructions. No
+script is run by SkillManagerOS.
 
 The Import view shows saved history across app restarts. Each record is checked against the current
 folder before **Move to recovery** is offered. Undo stops if files or directory identity changed;
@@ -160,6 +173,13 @@ paths, file hashes, and timestamps, not skill contents. History is capped at 100
 journal stops new imports rather than discarding old recovery evidence. Archives, downloads, project
 installs, overwrites, updates, and CLI import are not supported. See the
 [security model](SECURITY.md) for file limits and the full trust boundary.
+
+For new imports, history records a possible recovery path before any files are copied. If a copy
+fails after creating a partial destination, that folder is moved to the recorded recovery path when
+possible. **Needs review** distinguishes an incomplete import from an incomplete undo; neither is
+automatically retried. The desktop allows one running instance at a time so separate windows cannot
+overwrite the same history. Older version-one history files remain readable and are upgraded on the
+next recorded action.
 
 ## Troubleshooting
 

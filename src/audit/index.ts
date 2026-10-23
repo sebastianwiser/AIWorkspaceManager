@@ -17,6 +17,7 @@ const FAMILIES = [
   "exposure",
   "commands",
   "provenance",
+  "instructions",
 ] as const satisfies readonly AuditFamily[];
 const INCOMPLETE_DIAGNOSTICS = new Set([
   "PERMISSION_DENIED",
@@ -614,6 +615,42 @@ const OBSERVATION_RULES: Record<
       "This bundle exceeded the audit's file, depth, or size limit, or a directory could not be read.",
     remedy: "Review the uninspected files manually before installing or enabling this item.",
     evidence: "The bounded bundle walk stopped before every file could be inspected.",
+  },
+  "instruction-authority-override": {
+    ruleId: "instruction.authority-override",
+    family: "instructions",
+    severity: "warning",
+    confidence: "possible",
+    title: "Possible instruction authority spoofing",
+    explanation:
+      "Local text claims elevated authority while telling the AI to override other instructions. It may be an example rather than an active instruction.",
+    remedy: "Read the cited file in context before allowing the skill or plugin to guide an AI.",
+    evidence:
+      "An authority claim and instruction-override pattern appeared near each other; the text is omitted.",
+  },
+  "instruction-concealed-action": {
+    ruleId: "instruction.concealed-action",
+    family: "instructions",
+    severity: "warning",
+    confidence: "possible",
+    title: "Possible concealed AI action",
+    explanation:
+      "Local text appears to pair an action with a request to avoid telling or asking the user. Static text cannot establish intent.",
+    remedy:
+      "Check whether this instruction would bypass the user's review of a consequential action.",
+    evidence: "A concealment and action pattern appeared near each other; the text is omitted.",
+  },
+  "instruction-private-data-egress": {
+    ruleId: "instruction.private-data-egress",
+    family: "instructions",
+    severity: "warning",
+    confidence: "possible",
+    title: "Possible instruction to send private data outward",
+    explanation:
+      "Local text mentions private data, an outward transfer, and an external destination together. No transfer was observed.",
+    remedy: "Review the cited instruction and destination before letting an AI use this component.",
+    evidence:
+      "Private-data, transfer, and external-destination patterns appeared together; values are omitted.",
   },
 };
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { getMcpServerIdentity, getPluginIdentity, getSkillIdentity } from "../inventory.js";
 import { hashRegularFile, readRegularFileBounded } from "../safe-file.js";
+import { analyzeInstructionText } from "./instructions.js";
 import type {
   ApplicationId,
   AuditFileRecord,
@@ -288,6 +289,15 @@ async function inspectTarget(target: FileTarget): Promise<AuditEvidence> {
     const line = 1 + (contents.slice(0, match.index).match(/\n/g)?.length ?? 0);
     for (const association of target.associations.filter((item) => item.inspectText))
       add(signal, line, association);
+  }
+  if (/\.(?:md|txt)$/i.test(target.filePath)) {
+    for (const match of analyzeInstructionText(contents)) {
+      for (const association of target.associations.filter(
+        (item) => item.inspectText && (item.itemKind === "skill" || item.itemKind === "plugin"),
+      )) {
+        add(match.signal, match.line, association);
+      }
+    }
   }
   const skillAssociations = target.associations.filter((item) => item.itemKind === "skill");
   if (skillAssociations.length > 0) {

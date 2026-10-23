@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type {
   ApplicationChoice,
+  AuditExcerptResult,
   AuditFamily,
   AuditFinding,
   DesktopScanResult,
@@ -12,6 +13,7 @@ const familyLabels: Record<AuditFamily, string> = {
   exposure: "Exposure",
   commands: "Commands",
   provenance: "Provenance",
+  instructions: "AI instructions",
 };
 
 export function AuditPanel({
@@ -20,12 +22,14 @@ export function AuditPanel({
   error,
   onRetry,
   onInspect,
+  onReadExcerpt,
 }: {
   scanResult: DesktopScanResult | null;
   isScanning: boolean;
   error: string | null;
   onRetry: () => void;
   onInspect: (finding: AuditFinding) => void;
+  onReadExcerpt: (findingId: string) => Promise<AuditExcerptResult>;
 }) {
   const [query, setQuery] = useState("");
   const [application, setApplication] = useState<ApplicationChoice>("all");
@@ -61,7 +65,8 @@ export function AuditPanel({
           <p className="section-kicker">WORKSPACE AUDIT</p>
           <h2 id="audit-heading">Know what needs a closer look.</h2>
           <p>
-            Review local structure, exposure, commands, and provenance without running anything.
+            Review local structure, exposure, commands, provenance, and possible AI-instruction
+            risks without running anything.
           </p>
         </div>
         {scanResult && (
@@ -239,7 +244,12 @@ export function AuditPanel({
           ) : visible.length > 0 ? (
             <div className="audit-grid">
               {visible.map((finding) => (
-                <FindingCard key={finding.id} finding={finding} onInspect={onInspect} />
+                <FindingCard
+                  key={`${scanResult?.scannedAt}:${finding.id}`}
+                  finding={finding}
+                  onInspect={onInspect}
+                  onReadExcerpt={onReadExcerpt}
+                />
               ))}
             </div>
           ) : (
@@ -319,10 +329,30 @@ function AuditAccessFact({
 function FindingCard({
   finding,
   onInspect,
+  onReadExcerpt,
 }: {
   finding: AuditFinding;
   onInspect: (finding: AuditFinding) => void;
+  onReadExcerpt: (findingId: string) => Promise<AuditExcerptResult>;
 }) {
+  const [showExcerpt, setShowExcerpt] = useState(false);
+  const [excerpt, setExcerpt] = useState<AuditExcerptResult | null>(null);
+  const canInspectLine = finding.family === "instructions" && finding.line !== null;
+
+  async function toggleExcerpt(): Promise<void> {
+    if (showExcerpt) {
+      setShowExcerpt(false);
+      return;
+    }
+    setShowExcerpt(true);
+    setExcerpt(null);
+    try {
+      setExcerpt(await onReadExcerpt(finding.id));
+    } catch {
+      setExcerpt({ ok: false, error: "The line could not be opened. Rescan and try again." });
+    }
+  }
+
   return (
     <article className={`audit-finding ${finding.severity}`}>
       <div className="audit-finding-top">
@@ -345,12 +375,47 @@ function FindingCard({
         <span>
           <strong>Next:</strong> {finding.remedy}
         </span>
-        {finding.itemKind !== "source" && finding.itemIds.length > 0 && (
-          <button type="button" onClick={() => onInspect(finding)}>
-            View item
-          </button>
-        )}
+        <div className="audit-finding-actions">
+          {canInspectLine && (
+            <button type="button" aria-expanded={showExcerpt} onClick={() => void toggleExcerpt()}>
+              {showExcerpt ? "Hide line" : "Inspect line"}
+            </button>
+          )}
+          {finding.itemKind !== "source" && finding.itemIds.length > 0 && (
+            <button type="button" onClick={() => onInspect(finding)}>
+              View item
+            </button>
+          )}
+        </div>
       </div>
+      {showExcerpt && (
+        <section className="audit-excerpt" aria-label={`Source around line ${finding.line}`}>
+          {!excerpt ? (
+            <p role="status">Reading the cited lines…</p>
+          ) : !excerpt.ok ? (
+            <p role="alert">{excerpt.error}</p>
+          ) : (
+            <>
+              <strong>Source around line {excerpt.highlightedLine}</strong>
+              <div className="audit-excerpt-lines">
+                {excerpt.lines.map((line) => (
+                  <div
+                    className={`audit-excerpt-line${line.number === excerpt.highlightedLine ? " highlighted" : ""}`}
+                    key={line.number}
+                  >
+                    <span>{line.number}</span>
+                    <code>
+                      {line.text || " "}
+                      {line.truncated ? " … [line shortened]" : ""}
+                    </code>
+                  </div>
+                ))}
+              </div>
+              <p>Read-only preview. Edit the file at the location above, then rescan.</p>
+            </>
+          )}
+        </section>
+      )}
     </article>
   );
 }

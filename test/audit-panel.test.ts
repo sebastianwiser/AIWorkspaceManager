@@ -45,6 +45,7 @@ function render(scanResult: DesktopScanResult | null, error: string | null = nul
       error,
       onRetry: () => undefined,
       onInspect: () => undefined,
+      onReadExcerpt: async () => ({ ok: false as const, error: "Not used during static render." }),
     }),
   );
 }
@@ -87,5 +88,29 @@ test("audit view presents sanitized evidence and links to the affected item", ()
   assert.match(html, /Credential-like text found/);
   assert.match(html, /SKILL.md:4/);
   assert.match(html, /View item/);
+  assert.doesNotMatch(html, /Inspect line/);
   assert.doesNotMatch(html, /sk-zzzz|API_KEY=/);
+});
+
+test("audit view presents possible AI-instruction risks as a separate category", () => {
+  const html = render({
+    ...emptyScan,
+    audit: {
+      ...emptyScan.audit,
+      findings: [
+        {
+          ...finding,
+          ruleId: "instruction.private-data-egress",
+          family: "instructions",
+          title: "Possible instruction to send private data outward",
+          explanation: "No transfer was observed.",
+          evidence: "Controlled pattern summary only.",
+        },
+      ],
+    },
+  });
+  assert.match(html, /AI instructions/);
+  assert.match(html, /Possible instruction to send private data outward/);
+  assert.match(html, /No transfer was observed/);
+  assert.match(html, /Inspect line/);
 });

@@ -373,6 +373,7 @@ export function App() {
             error={error}
             onRetry={refreshInventory}
             onInspect={inspectAuditFinding}
+            onReadExcerpt={(findingId) => window.skillManager.readAuditExcerpt(findingId)}
           />
         ) : inventoryKind === "relationships" ? (
           <RelationshipPanel

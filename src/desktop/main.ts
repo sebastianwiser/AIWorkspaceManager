@@ -5,6 +5,7 @@ import electron from "electron";
 import { getApplication, getScanContext } from "../applications.js";
 import { collectAuditEvidence } from "../audit/collect.js";
 import { createAuditReport } from "../audit/index.js";
+import { readAuditExcerpt } from "../audit/excerpt.js";
 import {
   compareAuditFiles,
   mergeAuditFiles,
@@ -30,6 +31,8 @@ import { ImportHistory } from "../management/history.js";
 import { readSkillContent, type ExpectedFileIdentity } from "../skill-content.js";
 import type {
   ApplicationId,
+  AuditExcerptResult,
+  AuditReport,
   DesktopScanResult,
   InventoryChanges,
   SkillContentResult,
@@ -44,6 +47,7 @@ const rendererFile = path.join(currentDirectory, "renderer", "index.html");
 const rendererUrl = pathToFileURL(rendererFile).href;
 const SCAN_CHANNEL = "inventory:scan";
 const READ_CONTENT_CHANNEL = "inventory:read-skill-content";
+const READ_AUDIT_EXCERPT_CHANNEL = "audit:read-excerpt";
 const RESET_BASELINE_CHANNEL = "inventory:reset-baseline";
 const CHOOSE_IMPORT_CHANNEL = "management:choose-skill-import";
 const APPLY_IMPORT_CHANNEL = "management:apply-skill-import";
@@ -51,6 +55,7 @@ const UNDO_IMPORT_CHANNEL = "management:undo-skill-import";
 const LIST_IMPORT_HISTORY_CHANNEL = "management:list-skill-import-history";
 
 let allowedInstructionFiles = new Map<string, ExpectedFileIdentity>();
+let latestAudit: AuditReport | null = null;
 let latestSnapshot: InventorySnapshot | null = null;
 let pendingImport: SkillImportPlan | null = null;
 let importHistory: ImportHistory;
@@ -93,6 +98,7 @@ function requireTrustedWindow(
 function registerHandlers(): void {
   ipcMain.handle(SCAN_CHANNEL, async (event): Promise<DesktopScanResult> => {
     requireTrustedWindow(event);
+    latestAudit = null;
     const context = await getScanContext();
     const result = await scanLocalInventory({
       applications: context.applications,
@@ -185,6 +191,8 @@ function registerHandlers(): void {
       );
     }
 
+    latestAudit = audit;
+
     return {
       ...result,
       scannedAt,
@@ -228,6 +236,21 @@ function registerHandlers(): void {
   );
 
   ipcMain.handle(
+    READ_AUDIT_EXCERPT_CHANNEL,
+    async (event, findingId: unknown): Promise<AuditExcerptResult> => {
+      requireTrustedWindow(event);
+      const finding =
+        typeof findingId === "string"
+          ? latestAudit?.findings.find((item) => item.id === findingId)
+          : null;
+      if (!finding || !latestAudit?.files) {
+        return { ok: false, error: "That warning is not part of the current audit. Rescan first." };
+      }
+      return readAuditExcerpt(finding, latestAudit.files);
+    },
+  );
+
+  ipcMain.handle(
     CHOOSE_IMPORT_CHANNEL,
     async (event, application: unknown): Promise<SkillImportSelection> => {
       const window = requireTrustedWindow(event);
@@ -259,6 +282,17 @@ function registerHandlers(): void {
       }
       return withManagementLock(async () => {
         const plan = pendingImport!;
+        if (plan.preview.instructionRiskCount > 0) {
+          const review = await dialog.showMessageBox(window, {
+            type: "warning",
+            buttons: ["Cancel", "Continue to import confirmation"],
+            defaultId: 0,
+            cancelId: 0,
+            message: "Review possible AI-instruction risks first",
+            detail: `${plan.preview.instructionRiskCount} heuristic warning${plan.preview.instructionRiskCount === 1 ? "" : "s"} appeared in this skill's Markdown or text files. The preview lists file locations. These warnings may be examples rather than active instructions, but the skill could guide an AI after import. No files have been copied.`,
+          });
+          if (review.response !== 1) return null;
+        }
         const confirmation = await dialog.showMessageBox(window, {
           type: "warning",
           buttons: ["Cancel", "Import skill"],
@@ -268,9 +302,9 @@ function registerHandlers(): void {
           detail: `From: ${plan.preview.sourceDirectory}\nTo: ${plan.preview.destinationDirectory}\n${plan.preview.fileCount} files. No scripts will be run.${plan.preview.includesScripts ? " This skill contains scripts that its AI application may run later." : ""}`,
         });
         if (confirmation.response !== 1) return null;
-        await importHistory.beginImport(plan);
+        const recovery = await importHistory.beginImport(plan);
         pendingImport = null;
-        const result = await applyLocalSkillImport(plan, Date.now(), plan.preview.id);
+        const result = await applyLocalSkillImport(plan, Date.now(), plan.preview.id, recovery);
         await importHistory.finishImport(result);
         return result.receipt;
       });
@@ -341,25 +375,37 @@ function createWindow() {
 
 app.setName("SkillManagerOS");
 
-void app.whenReady().then(() => {
-  importHistory = new ImportHistory(
-    path.join(app.getPath("userData"), "skillmanager", "import-history.json"),
-    destinationRootFor,
-  );
-  // Reconcile on startup without changing files or silently retrying an import.
-  registerHandlers();
-  createWindow();
-  void importHistory.list().catch(() => undefined);
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window) {
+      if (window.isMinimized()) window.restore();
+      window.focus();
     }
   });
-});
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
+  void app.whenReady().then(() => {
+    importHistory = new ImportHistory(
+      path.join(app.getPath("userData"), "skillmanager", "import-history.json"),
+      destinationRootFor,
+    );
+    // Reconcile on startup without changing files or silently retrying an import.
+    registerHandlers();
+    createWindow();
+    void importHistory.list().catch(() => undefined);
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+}
